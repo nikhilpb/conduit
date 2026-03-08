@@ -13,6 +13,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 COPY adk_agents ./adk_agents
 COPY config ./config
+COPY DESIGN.md ./DESIGN.md
 
 RUN uv sync --locked --no-dev
 RUN mkdir -p /app/data
