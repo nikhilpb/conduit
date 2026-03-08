@@ -7,17 +7,17 @@ void main() {
   test('stored URL is only used when no dart-define URL is present', () {
     expect(
       _resolveInitialServerUrlForTest(
-        storedServerUrl: 'http://old-host:8000',
+        storedServerUrl: 'http://old-host:18423',
         definedServerUrl: null,
       ),
-      'http://old-host:8000',
+      'http://old-host:18423',
     );
     expect(
       _resolveInitialServerUrlForTest(
-        storedServerUrl: 'http://old-host:8000',
-        definedServerUrl: 'http://10.0.2.2:8000',
+        storedServerUrl: 'http://old-host:18423',
+        definedServerUrl: 'http://10.0.2.2:18423',
       ),
-      'http://10.0.2.2:8000',
+      'http://10.0.2.2:18423',
     );
   });
 

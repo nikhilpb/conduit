@@ -17,6 +17,6 @@ COPY config ./config
 RUN uv sync --locked --no-dev
 RUN mkdir -p /app/data
 
-EXPOSE 8000
+EXPOSE 18423
 
 CMD ["uv", "run", "conduit-api"]

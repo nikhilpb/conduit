@@ -4,8 +4,8 @@ import 'package:think_client/conduit_api.dart';
 void main() {
   test('webSocketUriForBaseUrl converts http urls to ws urls', () {
     expect(
-      webSocketUriForBaseUrl('http://10.0.2.2:8000').toString(),
-      'ws://10.0.2.2:8000/chat',
+      webSocketUriForBaseUrl('http://10.0.2.2:18423').toString(),
+      'ws://10.0.2.2:18423/chat',
     );
   });
 

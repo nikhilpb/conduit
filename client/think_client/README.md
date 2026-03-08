@@ -10,12 +10,12 @@ From the repo root:
 uv run conduit-api
 ```
 
-The backend now binds to `0.0.0.0:8000` by default.
+The backend now binds to `0.0.0.0:18423` by default.
 
 Health check:
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:18423/health
 ```
 
 ## Run The Client
@@ -27,13 +27,13 @@ Examples:
 
 ```bash
 # Android emulator talking to the host machine
-flutter run -d android --dart-define=CONDUIT_SERVER_URL=http://10.0.2.2:8000
+flutter run -d android --dart-define=CONDUIT_SERVER_URL=http://10.0.2.2:18423
 
 # Physical Android device over Tailscale
-flutter run -d android --dart-define=CONDUIT_SERVER_URL=http://100.x.y.z:8000
+flutter run -d android --dart-define=CONDUIT_SERVER_URL=http://100.x.y.z:18423
 
 # Desktop local development
-flutter run -d macos --dart-define=CONDUIT_SERVER_URL=http://127.0.0.1:8000
+flutter run -d macos --dart-define=CONDUIT_SERVER_URL=http://127.0.0.1:18423
 ```
 
 If you do not pass `CONDUIT_SERVER_URL`, open Settings in the app and enter the
@@ -42,7 +42,7 @@ server URL manually.
 Important:
 
 - `10.0.2.2` only works on the Android emulator.
-- On `macOS` or `Chrome`, use `http://127.0.0.1:8000`.
+- On `macOS` or `Chrome`, use `http://127.0.0.1:18423`.
 - `--dart-define` is read at app startup, so after changing it you need a fresh
   `flutter run` or a hot restart, not just hot reload.
 

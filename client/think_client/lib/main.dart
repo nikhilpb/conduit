@@ -1239,7 +1239,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Text('Server URL', style: theme.textTheme.titleLarge),
                   const SizedBox(height: 8),
                   Text(
-                    'Use your Tailscale IP and port, for example `http://100.x.y.z:8000`.',
+                    'Use your Tailscale IP and port, for example `http://100.x.y.z:18423`.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: const Color(0xFF5B6672),
                     ),
@@ -1250,7 +1250,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     keyboardType: TextInputType.url,
                     autocorrect: false,
                     decoration: InputDecoration(
-                      hintText: 'http://100.x.y.z:8000',
+                      hintText: 'http://100.x.y.z:18423',
                       filled: true,
                       fillColor: const Color(0xFFF8F3EB),
                       border: OutlineInputBorder(

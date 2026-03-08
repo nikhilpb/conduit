@@ -8,11 +8,11 @@ services:
       - .env
     environment:
       CONDUIT_HOST: 0.0.0.0
-      CONDUIT_PORT: 8000
+      CONDUIT_PORT: 18423
       CONDUIT_DB_PATH: /app/data/conduit.db
       CONDUIT_TOOL_PERMISSIONS_PATH: /app/config/tools.yaml
     ports:
-      - "${CONDUIT_PUBLISH_IP:-127.0.0.1}:8000:8000"
+      - "${CONDUIT_PUBLISH_IP:-127.0.0.1}:18423:18423"
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
@@ -22,7 +22,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18423/health').read()",
         ]
       interval: 30s
       timeout: 5s

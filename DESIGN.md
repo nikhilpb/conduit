@@ -63,7 +63,7 @@ The system follows a three-tier architecture: thin client, API gateway, and agen
 │  GCP VM (on Tailscale)                               │
 │                                                      │
 │  ┌────────────────────────────────────────────────┐  │
-│  │  FastAPI Gateway  :8000                        │  │
+│  │  FastAPI Gateway  :18423                       │  │
 │  │  • WebSocket /chat                             │  │
 │  │  • REST /sessions, /health                     │  │
 │  └────────────────────────────────────────────────┘  │
@@ -99,7 +99,7 @@ The system follows a three-tier architecture: thin client, API gateway, and agen
 
 ### 2.2 Network Topology
 
-All components communicate over Tailscale's WireGuard mesh network. The GCP VM binds FastAPI to its Tailscale IP (100.x.y.z) on port 8000. The Flutter client connects to this IP directly. No DNS, no TLS termination, no reverse proxy needed for this service — Tailscale encrypts all traffic at the network layer.
+All components communicate over Tailscale's WireGuard mesh network. The GCP VM binds FastAPI to its Tailscale IP (100.x.y.z) on port 18423. The Flutter client connects to this IP directly. No DNS, no TLS termination, no reverse proxy needed for this service — Tailscale encrypts all traffic at the network layer.
 
 The VM retains outbound internet access for LLM API calls (Anthropic, Google, OpenAI). Existing services on the VM are unaffected.
 
@@ -337,7 +337,7 @@ When the server emits `approval_required`, the chat screen presents a blocking c
 
 ### 4.6 Connection Management
 
-The app connects to the server via WebSocket at `ws://<tailscale-ip>:8000/chat`. Since Tailscale handles encryption, plain WebSocket (`ws://`) is used rather than secure WebSocket (`wss://`). The app implements exponential backoff reconnection: 1s, 2s, 4s, 8s, max 30s. A connection status indicator is shown in the app bar. Client-generated `message_id` values allow the app to safely retry a send after reconnect without creating duplicate turns.
+The app connects to the server via WebSocket at `ws://<tailscale-ip>:18423/chat`. Since Tailscale handles encryption, plain WebSocket (`ws://`) is used rather than secure WebSocket (`wss://`). The app implements exponential backoff reconnection: 1s, 2s, 4s, 8s, max 30s. A connection status indicator is shown in the app bar. Client-generated `message_id` values allow the app to safely retry a send after reconnect without creating duplicate turns.
 
 ---
 
@@ -399,7 +399,7 @@ The CLI reads server connection details from `~/.config/conduit/config.yaml`:
 ```yaml
 server:
   host: 100.x.y.z   # Tailscale IP of the GCP VM
-  port: 8000
+  port: 18423
 ```
 
 This can be overridden per-command with `--host` and `--port` flags.
@@ -433,7 +433,7 @@ services:
   conduit:
     # ...existing config...
     ports:
-      - "100.x.y.z:8000:8000"  # FastAPI
+      - "100.x.y.z:18423:18423"  # FastAPI
       - "100.x.y.z:4200:4200"  # ADK Web (dev only)
     environment:
       - CONDUIT_ADK_WEB=true    # intentionally enabled for debugging on the Tailscale network
@@ -472,7 +472,7 @@ services:
   conduit:
     build: ./conduit
     ports:
-      - "100.x.y.z:8000:8000"  # FastAPI (Tailscale only)
+      - "100.x.y.z:18423:18423"  # FastAPI (Tailscale only)
       - "100.x.y.z:4200:4200"  # ADK Web dev UI (Tailscale only)
     volumes:
       - ./conduit/data:/app/data        # SQLite DB
@@ -503,7 +503,7 @@ No migrations framework is used in v1. Schema changes are applied manually via a
 | `OPENAI_API_KEY` | GPT API access |
 | `CONDUIT_DB_PATH` | SQLite database path (default: `/app/data/conduit.db`) |
 | `CONDUIT_HOST` | Bind address (default: `0.0.0.0`) |
-| `CONDUIT_PORT` | Port (default: `8000`) |
+| `CONDUIT_PORT` | Port (default: `18423`) |
 | `CONDUIT_ADK_WEB` | Enable ADK Web dev UI on port 4200 (default: `true`) |
 
 ---

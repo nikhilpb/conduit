@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     app_name: str = "conduit"
     model: str = "claude-sonnet-4-6"
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 18423
     db_path: str = "data/conduit.db"
     tool_permissions_path: str = "config/tools.yaml"
     internal_user_id: str = "single-user"
