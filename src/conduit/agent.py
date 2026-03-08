@@ -1,0 +1,86 @@
+"""ADK agent construction for Conduit."""
+
+from google.adk.agents import Agent
+from google.adk.tools.base_tool import BaseTool
+from google.adk.tools.tool_context import ToolContext
+
+from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
+from conduit.config import Settings
+from conduit.tool_permissions import permission_summary
+from conduit.tools.web_search import build_web_search_tool
+from conduit.tools.web_fetch import build_web_fetch_tool
+
+
+def build_root_agent(settings: Settings) -> Agent:
+    """Build the single-agent runtime used by the API and ADK Web."""
+
+    web_search = build_web_search_tool(settings)
+    web_fetch = build_web_fetch_tool(settings)
+    model = settings.model
+    if settings.provider == "anthropic":
+        model = ConduitAnthropicLlm(
+            model=settings.model,
+            max_tokens=settings.anthropic_max_tokens,
+            thinking_budget_tokens=settings.anthropic_thinking_budget_tokens,
+            interleaved_thinking=settings.anthropic_interleaved_thinking,
+        )
+
+    return Agent(
+        name="conduit",
+        model=model,
+        description="A personal assistant that can search the web and fetch webpages.",
+        instruction=(
+            "You are Conduit, a concise research assistant. "
+            "Use web_search when you need to discover fresh information. "
+            "Start with one focused web_search query and only retry if the tool reports an error or clearly irrelevant results. "
+            "Use web_fetch when you need to inspect a specific page or URL in detail. "
+            "Prefer citing concrete facts from fetched pages when possible. "
+            "If you are uncertain, say so directly."
+        ),
+        before_tool_callback=_build_before_tool_callback(settings),
+        tools=[
+            web_search,
+            web_fetch,
+        ],
+    )
+
+
+def _build_before_tool_callback(settings: Settings):
+    async def before_tool(
+        tool: BaseTool,
+        args: dict,
+        tool_context: ToolContext,
+    ) -> dict | None:
+        mode = settings.tool_permissions.get(tool.name, "allow")
+        if mode == "allow":
+            return None
+
+        if mode == "deny":
+            return {
+                "error": f"Tool `{tool.name}` is disabled by server policy.",
+            }
+
+        summary = permission_summary(tool.name, args)
+        if not tool_context.tool_confirmation:
+            tool_context.request_confirmation(
+                hint=summary,
+                payload={
+                    "tool": tool.name,
+                    "args": args,
+                    "summary": summary,
+                    "permission": "ask",
+                },
+            )
+            tool_context.actions.skip_summarization = True
+            return {
+                "error": "This tool call requires confirmation.",
+            }
+
+        if not tool_context.tool_confirmation.confirmed:
+            return {
+                "error": f"Tool `{tool.name}` was denied by the user.",
+            }
+
+        return None
+
+    return before_tool

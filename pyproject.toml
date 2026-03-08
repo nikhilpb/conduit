@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "conduit"
+version = "0.1.0"
+description = "Single-user ADK assistant with a FastAPI gateway."
+readme = "DESIGN.md"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic>=0.54,<1",
+  "beautifulsoup4>=4.13.5,<5",
+  "fastapi==0.135.1",
+  "google-adk==1.26.0",
+  "httpx>=0.28.1,<0.29",
+  "pydantic-settings>=2.10.1,<3",
+  "pyyaml>=6.0.2,<7",
+  "uvicorn[standard]==0.35.0",
+]
+
+[project.scripts]
+conduit-api = "conduit.main:run"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.4,<9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/conduit"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

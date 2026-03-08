@@ -1,0 +1,5 @@
+tools:
+  web_search:
+    mode: allow
+  web_fetch:
+    mode: allow

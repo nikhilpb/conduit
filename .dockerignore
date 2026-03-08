@@ -1,0 +1,17 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+.adk
+.env
+.python-version
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+client/
+tests/
+data/
+*.db
+*.db-shm
+*.db-wal

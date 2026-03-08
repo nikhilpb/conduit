@@ -1,0 +1,59 @@
+"""Pydantic schemas for the FastAPI surface."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel
+from pydantic import Field
+
+
+class HealthResponse(BaseModel):
+    ok: bool
+    app_name: str
+    model: str
+    provider: str
+    provider_api_key_configured: bool
+
+
+class SessionResponse(BaseModel):
+    session_id: str
+    last_update_time: float
+    event_count: int
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionResponse]
+
+
+class CreateSessionResponse(BaseModel):
+    session_id: str
+
+
+class ToolCall(BaseModel):
+    name: str
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class TranscriptMessage(BaseModel):
+    message_id: str
+    role: str
+    text: str
+    created_at: float
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+
+
+class SessionDetailResponse(BaseModel):
+    session_id: str
+    messages: list[TranscriptMessage] = Field(default_factory=list)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    session_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    session_id: str
+    reply: str
+    tool_calls: list[ToolCall] = Field(default_factory=list)
