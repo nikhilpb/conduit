@@ -1,4 +1,4 @@
-# Think Client
+# Conduit Client
 
 Thin Flutter client for the Conduit backend.
 

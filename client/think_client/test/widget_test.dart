@@ -27,11 +27,11 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     await tester.pumpWidget(
-      ThinkClientApp(initialServerUrl: null, settingsStore: SettingsStore()),
+      ConduitApp(initialServerUrl: null, settingsStore: SettingsStore()),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Point Think at your server.'), findsOneWidget);
+    expect(find.text('Point Conduit at your server.'), findsOneWidget);
     expect(find.text('Configure server'), findsOneWidget);
   });
 }

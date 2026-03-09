@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'conduit_api.dart';
@@ -18,15 +19,15 @@ Future<void> main() async {
     storedServerUrl: storedServerUrl,
   );
   runApp(
-    ThinkClientApp(
+    ConduitApp(
       initialServerUrl: initialServerUrl,
       settingsStore: settingsStore,
     ),
   );
 }
 
-class ThinkClientApp extends StatefulWidget {
-  const ThinkClientApp({
+class ConduitApp extends StatefulWidget {
+  const ConduitApp({
     super.key,
     required this.initialServerUrl,
     required this.settingsStore,
@@ -36,17 +37,17 @@ class ThinkClientApp extends StatefulWidget {
   final SettingsStore settingsStore;
 
   @override
-  State<ThinkClientApp> createState() => _ThinkClientAppState();
+  State<ConduitApp> createState() => _ConduitAppState();
 }
 
-class _ThinkClientAppState extends State<ThinkClientApp> {
+class _ConduitAppState extends State<ConduitApp> {
   late String? _serverUrl = widget.initialServerUrl;
 
   @override
   Widget build(BuildContext context) {
     final baseTextTheme = GoogleFonts.ibmPlexSansTextTheme();
     return MaterialApp(
-      title: 'Think',
+      title: 'Conduit',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -285,7 +286,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Think'),
+        title: const Text('Conduit'),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -316,7 +317,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
             if (serverUrl == null || serverUrl.trim().isEmpty)
               EmptyServerCard(onConfigure: _openSettings)
             else ...[
-              OverviewCard(serverUrl: serverUrl, health: _health),
+                  OverviewCard(health: _health),
               const SizedBox(height: 16),
               if (_loading)
                 const Center(
@@ -1336,7 +1337,7 @@ class EmptyServerCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Point Think at your server.',
+              'Point Conduit at your server.',
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 12),
@@ -1362,11 +1363,9 @@ class EmptyServerCard extends StatelessWidget {
 class OverviewCard extends StatelessWidget {
   const OverviewCard({
     super.key,
-    required this.serverUrl,
     required this.health,
   });
 
-  final String serverUrl;
   final HealthStatus? health;
 
   @override
@@ -1395,23 +1394,6 @@ class OverviewCard extends StatelessWidget {
                     style: theme.textTheme.headlineSmall,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _trimServerUrl(serverUrl),
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: const Color(0xFF184E77),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _MetaChip(label: health?.model ?? 'Unknown model'),
-                _MetaChip(label: health?.provider ?? 'Unknown provider'),
-                _MetaChip(label: 'Thin client'),
               ],
             ),
           ],
@@ -1519,7 +1501,7 @@ class SessionCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${_formatTimestamp(session.lastUpdateTime)} • ${session.eventCount} events',
+                      _sessionMeta(session),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFF5B6672),
                       ),
@@ -1580,13 +1562,23 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (message.text.isNotEmpty)
-                SelectableText(
-                  message.text,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: foregroundColor,
-                    height: 1.45,
-                  ),
-                ),
+                isUser
+                    ? SelectableText(
+                        message.text,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: foregroundColor,
+                          height: 1.45,
+                        ),
+                      )
+                    : MarkdownBody(
+                        data: message.text,
+                        selectable: true,
+                        fitContent: true,
+                        styleSheet: _assistantMarkdownStyleSheet(
+                          context,
+                          foregroundColor,
+                        ),
+                      ),
               if (message.toolCalls.isNotEmpty) ...[
                 if (message.text.isNotEmpty) const SizedBox(height: 10),
                 Wrap(
@@ -1688,6 +1680,74 @@ class _ApprovalCard extends StatelessWidget {
   }
 }
 
+String _sessionMeta(SessionSummary session) {
+  final timestamp = _formatTimestamp(session.lastUpdateTime);
+  if (session.eventCount <= 0) {
+    return timestamp;
+  }
+  final label = session.eventCount == 1 ? '1 event' : '${session.eventCount} events';
+  return '$timestamp • $label';
+}
+
+MarkdownStyleSheet _assistantMarkdownStyleSheet(
+  BuildContext context,
+  Color foregroundColor,
+) {
+  final theme = Theme.of(context);
+  final bodyStyle = theme.textTheme.bodyLarge?.copyWith(
+    color: foregroundColor,
+    height: 1.45,
+  );
+  return MarkdownStyleSheet.fromTheme(theme).copyWith(
+    p: bodyStyle,
+    h1: theme.textTheme.headlineSmall?.copyWith(
+      color: foregroundColor,
+      height: 1.2,
+    ),
+    h2: theme.textTheme.titleLarge?.copyWith(
+      color: foregroundColor,
+      height: 1.25,
+    ),
+    h3: theme.textTheme.titleMedium?.copyWith(
+      color: foregroundColor,
+      height: 1.3,
+    ),
+    blockSpacing: 12,
+    blockquote: bodyStyle,
+    blockquotePadding: const EdgeInsets.all(12),
+    blockquoteDecoration: BoxDecoration(
+      color: const Color(0xFFF6EFE2),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: const Color(0xFFE6DDCF)),
+    ),
+    code: theme.textTheme.bodyMedium?.copyWith(
+      color: foregroundColor,
+      fontFamily: 'monospace',
+      fontSize: (theme.textTheme.bodyMedium?.fontSize ?? 14) * 0.92,
+    ),
+    codeblockPadding: const EdgeInsets.all(12),
+    codeblockDecoration: BoxDecoration(
+      color: const Color(0xFFF6EFE2),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: const Color(0xFFE6DDCF)),
+    ),
+    horizontalRuleDecoration: const BoxDecoration(
+      border: Border(
+        top: BorderSide(
+          color: Color(0xFFE6DDCF),
+          width: 1.5,
+        ),
+      ),
+    ),
+    listBullet: bodyStyle,
+    a: theme.textTheme.bodyLarge?.copyWith(
+      color: const Color(0xFF184E77),
+      decoration: TextDecoration.underline,
+      height: 1.45,
+    ),
+  );
+}
+
 class ToolChip extends StatelessWidget {
   const ToolChip({super.key, required this.toolCall, required this.isUser});
 
@@ -1757,25 +1817,6 @@ class StatusBadge extends StatelessWidget {
           Text(label),
         ],
       ),
-    );
-  }
-}
-
-class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F3EB),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFDCCFBC)),
-      ),
-      child: Text(label, style: Theme.of(context).textTheme.labelMedium),
     );
   }
 }
