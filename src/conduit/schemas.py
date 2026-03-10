@@ -21,6 +21,7 @@ class SessionResponse(BaseModel):
     session_id: str
     last_update_time: float
     event_count: int
+    title: str
 
 
 class SessionListResponse(BaseModel):

@@ -29,6 +29,7 @@ class SessionSummary {
     required this.sessionId,
     required this.lastUpdateTime,
     required this.eventCount,
+    required this.title,
   });
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) {
@@ -36,12 +37,14 @@ class SessionSummary {
       sessionId: json['session_id'] as String,
       lastUpdateTime: (json['last_update_time'] as num?)?.toDouble() ?? 0,
       eventCount: json['event_count'] as int? ?? 0,
+      title: json['title'] as String? ?? '',
     );
   }
 
   final String sessionId;
   final double lastUpdateTime;
   final int eventCount;
+  final String title;
 }
 
 class ToolCall {

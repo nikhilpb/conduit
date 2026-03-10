@@ -40,6 +40,14 @@ class ClientTurnRecord:
     updated_at: float
 
 
+@dataclass(slots=True)
+class SessionSummaryRecord:
+    session_id: str
+    last_update_time: float
+    event_count: int
+    title: str
+
+
 class SQLiteSessionService(BaseSessionService):
     """Persist ADK sessions, state, and events in SQLite."""
 
@@ -538,6 +546,71 @@ class SQLiteSessionService(BaseSessionService):
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    def _get_session_summaries_sync(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+    ) -> list[SessionSummaryRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    s.session_id,
+                    s.last_update_time,
+                    COUNT(e.event_id) AS event_count
+                FROM sessions AS s
+                LEFT JOIN events AS e
+                    ON e.app_name = s.app_name
+                    AND e.user_id = s.user_id
+                    AND e.session_id = s.session_id
+                WHERE s.app_name = ? AND s.user_id = ?
+                GROUP BY s.session_id, s.last_update_time
+                ORDER BY s.last_update_time DESC
+                """,
+                (app_name, user_id),
+            ).fetchall()
+
+            return [
+                SessionSummaryRecord(
+                    session_id=row["session_id"],
+                    last_update_time=row["last_update_time"],
+                    event_count=int(row["event_count"] or 0),
+                    title=self._load_session_title(
+                        connection,
+                        app_name=app_name,
+                        user_id=user_id,
+                        session_id=row["session_id"],
+                    ),
+                )
+                for row in rows
+            ]
+
+    def _load_session_title(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        app_name: str,
+        user_id: str,
+        session_id: str,
+    ) -> str:
+        rows = connection.execute(
+            """
+            SELECT event_json
+            FROM events
+            WHERE app_name = ? AND user_id = ? AND session_id = ?
+            ORDER BY event_order ASC
+            """,
+            (app_name, user_id, session_id),
+        ).fetchall()
+
+        for row in rows:
+            title = _extract_title_from_event_payload(json.loads(row["event_json"]))
+            if title:
+                return title
+
+        return f"Session {session_id[:8]}"
+
     async def get_client_turn(
         self,
         *,
@@ -626,6 +699,18 @@ class SQLiteSessionService(BaseSessionService):
                 error_message=error_message,
                 event_history=event_history,
             )
+
+    async def get_session_summaries(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+    ) -> list[SessionSummaryRecord]:
+        return await asyncio.to_thread(
+            self._get_session_summaries_sync,
+            app_name=app_name,
+            user_id=user_id,
+        )
 
     def _get_client_turn_sync(
         self,
@@ -795,3 +880,25 @@ class SQLiteSessionService(BaseSessionService):
                     message_id,
                 ),
             )
+
+
+def _extract_title_from_event_payload(payload: dict[str, Any]) -> str | None:
+    if payload.get("author") != "user":
+        return None
+
+    content = payload.get("content") or {}
+    parts = content.get("parts") or []
+    text_parts: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        text = str(part.get("text") or "").strip()
+        if not text or part.get("thought"):
+            continue
+        text_parts.append(text)
+
+    if not text_parts:
+        return None
+
+    title = " ".join(text_parts).replace("\n", " ").strip()
+    return " ".join(title.split()) or None

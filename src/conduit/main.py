@@ -81,13 +81,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/sessions", response_model=SessionListResponse)
     async def list_sessions() -> SessionListResponse:
-        sessions = await runtime.list_sessions()
+        sessions = await runtime.session_service.get_session_summaries(
+            app_name=runtime.settings.app_name,
+            user_id=runtime.settings.internal_user_id,
+        )
         return SessionListResponse(
             sessions=[
                 SessionResponse(
-                    session_id=session.id,
+                    session_id=session.session_id,
                     last_update_time=session.last_update_time,
-                    event_count=len(session.events),
+                    event_count=session.event_count,
+                    title=session.title,
                 )
                 for session in sessions
             ]

@@ -208,24 +208,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
       await _openSettings();
       return;
     }
-    try {
-      final sessionId = await client.createSession();
-      if (!mounted) {
-        return;
-      }
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (context) =>
-              ChatScreen(client: client, sessionId: sessionId),
-        ),
-      );
-      await _refresh();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showSnackBar('Could not create session: $error');
-    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (context) => ChatScreen(client: client)),
+    );
+    await _refresh();
   }
 
   Future<void> _openSession(SessionSummary session) async {
@@ -235,8 +221,11 @@ class _SessionListScreenState extends State<SessionListScreen> {
     }
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (context) =>
-            ChatScreen(client: client, sessionId: session.sessionId),
+        builder: (context) => ChatScreen(
+          client: client,
+          sessionId: session.sessionId,
+          initialTitle: session.title,
+        ),
       ),
     );
     await _refresh();
@@ -359,10 +348,16 @@ class _SessionListScreenState extends State<SessionListScreen> {
 }
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.client, required this.sessionId});
+  const ChatScreen({
+    super.key,
+    required this.client,
+    this.sessionId,
+    this.initialTitle,
+  });
 
   final ConduitApiClient client;
-  final String sessionId;
+  final String? sessionId;
+  final String? initialTitle;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -387,6 +382,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _submittingApproval = false;
   bool _disposed = false;
   String? _activeModelLabel;
+  late String? _sessionId = widget.sessionId;
+  late String _sessionTitle = widget.initialTitle ?? 'New conversation';
 
   bool get _sending => _pendingTurns.isNotEmpty;
 
@@ -410,19 +407,30 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _loadMessages() async {
+    final sessionId = _sessionId;
+    if (sessionId == null) {
+      setState(() {
+        _messages = const [];
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
+
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
-      final detail = await widget.client.getSession(widget.sessionId);
+      final detail = await widget.client.getSession(sessionId);
       if (!mounted) {
         return;
       }
       setState(() {
         _messages = detail.messages;
         _loading = false;
+        _sessionTitle = _deriveSessionTitle(detail.messages) ?? _sessionTitle;
       });
       _scrollToBottom();
     } catch (error) {
@@ -464,6 +472,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final clientMessageId = _makeClientMessageId();
+    final sessionId = _sessionId ?? _makeDraftSessionId();
     final now = DateTime.now().millisecondsSinceEpoch / 1000;
     final assistantMessageId = 'local-assistant-$clientMessageId';
     final optimisticMessage = TranscriptMessage(
@@ -487,6 +496,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages = [..._messages, optimisticMessage, optimisticAssistantMessage];
       _error = null;
       _connectionError = null;
+      _sessionId = sessionId;
+      if (_sessionTitle == 'New conversation') {
+        _sessionTitle = _deriveTitleFromText(text);
+      }
       _pendingTurns = {
         ..._pendingTurns,
         clientMessageId: _PendingTurn(
@@ -615,7 +628,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await socket.send({
         'type': 'text',
-        'session_id': widget.sessionId,
+        if (_sessionId != null) 'session_id': _sessionId,
         'message_id': pendingTurn.clientMessageId,
         'content': pendingTurn.text,
       });
@@ -668,6 +681,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     setState(() {
+      _sessionId = event.sessionId ?? _sessionId;
       _pendingTurns = {
         ..._pendingTurns,
         messageId: pendingTurn.copyWith(turnId: turnId),
@@ -1044,7 +1058,11 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 20,
-        title: Text('Session ${widget.sessionId.substring(0, 8)}'),
+        title: Text(
+          _sessionTitle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1693,8 +1711,10 @@ class SessionCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Session ${session.sessionId.substring(0, 8)}',
+                      session.title,
                       style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -1988,6 +2008,24 @@ String _sessionMeta(SessionSummary session) {
   return '$timestamp • $label';
 }
 
+String? _deriveSessionTitle(List<TranscriptMessage> messages) {
+  for (final message in messages) {
+    if (!message.isUser) {
+      continue;
+    }
+    final title = _deriveTitleFromText(message.text);
+    if (title.isNotEmpty) {
+      return title;
+    }
+  }
+  return null;
+}
+
+String _deriveTitleFromText(String text) {
+  final normalized = text.replaceAll('\n', ' ').trim();
+  return normalized.split(RegExp(r'\s+')).join(' ');
+}
+
 MarkdownStyleSheet _assistantMarkdownStyleSheet(
   BuildContext context,
   Color foregroundColor,
@@ -2252,6 +2290,12 @@ String _makeClientMessageId() {
   final microseconds = DateTime.now().microsecondsSinceEpoch;
   final entropy = math.Random().nextInt(1 << 20).toRadixString(16);
   return 'm_${microseconds}_$entropy';
+}
+
+String _makeDraftSessionId() {
+  final microseconds = DateTime.now().microsecondsSinceEpoch;
+  final entropy = math.Random().nextInt(1 << 20).toRadixString(16);
+  return 's_${microseconds}_$entropy';
 }
 
 String _formatTimestamp(double seconds) {

@@ -49,6 +49,8 @@ def test_create_and_list_sessions(tmp_path):
 
     assert list_response.status_code == 200
     assert list_response.json()["sessions"][0]["session_id"] == session_id
+    assert list_response.json()["sessions"][0]["event_count"] == 0
+    assert list_response.json()["sessions"][0]["title"] == f"Session {session_id[:8]}"
 
     detail_response = client.get(f"/sessions/{session_id}")
     assert detail_response.status_code == 200
@@ -56,6 +58,57 @@ def test_create_and_list_sessions(tmp_path):
         "session_id": session_id,
         "messages": [],
     }
+
+
+def test_list_sessions_uses_first_user_message_as_title(tmp_path):
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+        )
+    )
+    runtime = app.state.runtime
+    session = runtime.session_service._create_session_sync(  # noqa: SLF001
+        app_name=runtime.settings.app_name,
+        user_id=runtime.settings.internal_user_id,
+        session_id="session-1",
+    )
+    runtime.session_service._append_event_sync(  # noqa: SLF001
+        session=session,
+        event=Event(
+            invocation_id="inv-user",
+            author="user",
+            content=types.Content(
+                role="user",
+                parts=[types.Part(text="Tell me about Swiss trains in Zurich.")],
+            ),
+        ),
+    )
+    runtime.session_service._append_event_sync(  # noqa: SLF001
+        session=session,
+        event=Event(
+            invocation_id="inv-model",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text="Here is an answer.")],
+            ),
+        ),
+    )
+    client = TestClient(app)
+
+    response = client.get("/sessions")
+
+    assert response.status_code == 200
+    assert response.json()["sessions"] == [
+        {
+            "session_id": "session-1",
+            "last_update_time": response.json()["sessions"][0]["last_update_time"],
+            "event_count": 2,
+            "title": "Tell me about Swiss trains in Zurich.",
+        }
+    ]
 
 
 def test_model_settings_can_be_listed_and_updated(tmp_path):
