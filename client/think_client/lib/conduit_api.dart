@@ -69,11 +69,16 @@ class ConduitApiClient {
   Future<ChatReply> sendMessage({
     required String sessionId,
     required String message,
+    Map<String, dynamic>? context,
   }) async {
     final response = await _httpClient.post(
       _uri('/chat'),
       headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'session_id': sessionId, 'message': message}),
+      body: jsonEncode({
+        'session_id': sessionId,
+        'message': message,
+        if (context != null && context.isNotEmpty) 'context': context,
+      }),
     );
     return ChatReply.fromJson(_decodeJson(response));
   }

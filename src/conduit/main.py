@@ -27,6 +27,8 @@ from conduit.schemas import SessionResponse
 from conduit.schemas import TranscriptMessage
 from conduit.schemas import ToolCall
 from conduit.schemas import UpdateModelRequest
+from conduit.user_context import build_state_delta
+from conduit.user_context import coerce_turn_context
 from conduit.websocket_chat import WebSocketChatManager
 
 
@@ -119,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result = await runtime.run_turn(
             message=payload.message,
             session_id=payload.session_id,
+            state_delta=build_state_delta(coerce_turn_context(payload.context)),
         )
         return ChatResponse(
             session_id=result.session_id,
@@ -238,8 +241,6 @@ def _build_model_settings_response(runtime: ConduitRuntime) -> ModelSettingsResp
             for option in registry.options
         ],
     )
-
-
 app = create_app()
 
 

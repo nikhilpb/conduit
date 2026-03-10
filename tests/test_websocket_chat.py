@@ -34,6 +34,7 @@ class FakeRuntime:
         self.delay_seconds = delay_seconds
         self.require_approval = require_approval
         self.iter_event_calls = 0
+        self.received_state_deltas: list[dict[str, object] | None] = []
 
     async def create_session(self, session_id: str | None = None):
         return await self.session_service.create_session(
@@ -63,10 +64,20 @@ class FakeRuntime:
             return "ask"
         return "allow"
 
-    async def iter_events(self, *, session, new_message, invocation_id: str | None):
+    async def iter_events(
+        self,
+        *,
+        session,
+        new_message,
+        invocation_id: str | None,
+        state_delta=None,
+    ):
         del session
         del invocation_id
         self.iter_event_calls += 1
+        self.received_state_deltas.append(
+            dict(state_delta) if state_delta is not None else None
+        )
 
         if _is_approval_response(new_message):
             confirmed = bool(
@@ -127,6 +138,37 @@ def test_websocket_turn_streams_ack_tool_calls_tokens_and_done(tmp_path):
     ) == reply
     assert events[-1]["type"] == "done"
     assert runtime.iter_event_calls == 1
+
+
+def test_websocket_turn_passes_context_into_runtime_state(tmp_path):
+    app, runtime = _create_websocket_test_app(
+        tmp_path=tmp_path,
+        reply="Context works.",
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/chat") as websocket:
+        websocket.send_json(
+            {
+                "type": "text",
+                "message_id": "m1",
+                "content": "What time is it for me?",
+                "context": {
+                    "current_time": "2026-03-10 19:15:00 CET (UTC+01:00)",
+                    "location": "Zurich, Switzerland",
+                    "personal_instructions": "Prefer concise answers.",
+                },
+            }
+        )
+        _collect_events_until_terminal(websocket)
+
+    assert runtime.received_state_deltas == [
+        {
+            "conduit:current_time": "2026-03-10 19:15:00 CET (UTC+01:00)",
+            "user:conduit_location": "Zurich, Switzerland",
+            "user:conduit_personal_instructions": "Prefer concise answers.",
+        }
+    ]
 
 
 def test_websocket_replays_completed_turn_for_duplicate_message_id(tmp_path):

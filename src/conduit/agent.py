@@ -1,6 +1,8 @@
 """ADK agent construction for Conduit."""
 
+from google.adk.agents.context import Context
 from google.adk.agents import Agent
+from google.adk.models.llm_request import LlmRequest
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
 
@@ -10,6 +12,7 @@ from conduit.model_registry import infer_provider
 from conduit.tool_permissions import permission_summary
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
+from conduit.user_context import build_context_instructions
 
 
 def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
@@ -38,12 +41,23 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
             "Prefer citing concrete facts from fetched pages when possible. "
             "If you are uncertain, say so directly."
         ),
+        before_model_callback=_build_before_model_callback(),
         before_tool_callback=_build_before_tool_callback(settings),
         tools=[
             web_search,
             web_fetch,
         ],
     )
+
+
+def _build_before_model_callback():
+    async def before_model(context: Context, llm_request: LlmRequest):
+        instructions = build_context_instructions(context.state)
+        if instructions:
+            llm_request.append_instructions(instructions)
+        return None
+
+    return before_model
 
 
 def _build_before_tool_callback(settings: Settings):

@@ -209,7 +209,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
       return;
     }
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (context) => ChatScreen(client: client)),
+      MaterialPageRoute<void>(
+        builder: (context) =>
+            ChatScreen(client: client, settingsStore: widget.settingsStore),
+      ),
     );
     await _refresh();
   }
@@ -223,6 +226,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       MaterialPageRoute<void>(
         builder: (context) => ChatScreen(
           client: client,
+          settingsStore: widget.settingsStore,
           sessionId: session.sessionId,
           initialTitle: session.title,
         ),
@@ -351,11 +355,13 @@ class ChatScreen extends StatefulWidget {
   const ChatScreen({
     super.key,
     required this.client,
+    required this.settingsStore,
     this.sessionId,
     this.initialTitle,
   });
 
   final ConduitApiClient client;
+  final SettingsStore settingsStore;
   final String? sessionId;
   final String? initialTitle;
 
@@ -471,6 +477,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    final turnContext = await _buildTurnContext();
     final clientMessageId = _makeClientMessageId();
     final sessionId = _sessionId ?? _makeDraftSessionId();
     final now = DateTime.now().millisecondsSinceEpoch / 1000;
@@ -505,6 +512,7 @@ class _ChatScreenState extends State<ChatScreen> {
         clientMessageId: _PendingTurn(
           clientMessageId: clientMessageId,
           text: text,
+          context: turnContext,
           userMessageId: optimisticMessage.messageId,
           assistantMessageId: assistantMessageId,
         ),
@@ -631,10 +639,20 @@ class _ChatScreenState extends State<ChatScreen> {
         if (_sessionId != null) 'session_id': _sessionId,
         'message_id': pendingTurn.clientMessageId,
         'content': pendingTurn.text,
+        'context': pendingTurn.context.toJson(),
       });
     } catch (error) {
       _handleSocketClosed(socket, error: '$error');
     }
+  }
+
+  Future<_TurnContextPayload> _buildTurnContext() async {
+    final savedSettings = await widget.settingsStore.loadUserContextSettings();
+    return _TurnContextPayload(
+      currentTime: _formatCurrentTimeForContext(DateTime.now()),
+      location: savedSettings.location,
+      personalInstructions: savedSettings.personalInstructions,
+    );
   }
 
   void _handleChatEvent(ConduitChatSocket socket, ChatServerEvent event) {
@@ -1037,22 +1055,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  String _connectionLabel() {
-    switch (_connectionState) {
-      case _ChatConnectionState.connecting:
-        return 'Connecting';
-      case _ChatConnectionState.connected:
-        return 'Live';
-      case _ChatConnectionState.reconnecting:
-        return 'Retrying';
-      case _ChatConnectionState.offline:
-        return 'Offline';
-    }
-  }
-
-  bool _isConnectionHealthy() =>
-      _connectionState == _ChatConnectionState.connected;
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1063,15 +1065,6 @@ class _ChatScreenState extends State<ChatScreen> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: StatusBadge(
-              connected: _isConnectionHealthy(),
-              label: _connectionLabel(),
-            ),
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -1160,7 +1153,6 @@ class _ChatScreenState extends State<ChatScreen> {
                           decoration: InputDecoration(
                             labelText: _activeModelLabel ?? 'Active model',
                             floatingLabelBehavior: FloatingLabelBehavior.always,
-                            hintText: 'Ask Conduit something concrete.',
                             filled: true,
                             fillColor: const Color(0xFFFFFBF5),
                             contentPadding: const EdgeInsets.symmetric(
@@ -1234,6 +1226,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _controller = TextEditingController(
     text: widget.currentServerUrl ?? '',
   );
+  final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _personalInstructionsController =
+      TextEditingController();
 
   bool _saving = false;
   bool _updatingModel = false;
@@ -1245,6 +1240,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_loadLocalSettings());
     final candidate = widget.currentServerUrl?.trim() ?? '';
     if (candidate.isNotEmpty) {
       unawaited(_loadServerState(candidate));
@@ -1254,7 +1250,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _locationController.dispose();
+    _personalInstructionsController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadLocalSettings() async {
+    final savedSettings = await widget.settingsStore.loadUserContextSettings();
+    if (!mounted) {
+      return;
+    }
+    _locationController.text = savedSettings.location;
+    _personalInstructionsController.text = savedSettings.personalInstructions;
   }
 
   Future<void> _testConnection() async =>
@@ -1308,6 +1315,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     final candidate = _controller.text.trim();
+    final location = _locationController.text.trim();
+    final personalInstructions = _personalInstructionsController.text.trim();
     if (candidate.isEmpty) {
       setState(() {
         _error = 'Server URL cannot be empty.';
@@ -1321,6 +1330,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
+      await widget.settingsStore.saveUserContextSettings(
+        location: location,
+        personalInstructions: personalInstructions,
+      );
       final client = ConduitApiClient(baseUrl: candidate);
       final results = await Future.wait<Object>([
         client.health(),
@@ -1480,6 +1493,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 24),
+                  Text('Location', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(
+                    'This is added to the hidden model context on every turn.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF5B6672),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _locationController,
+                    textInputAction: TextInputAction.next,
+                    decoration: InputDecoration(
+                      hintText: 'Zurich, Switzerland',
+                      filled: true,
+                      fillColor: const Color(0xFFF8F3EB),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: const BorderSide(color: Color(0xFFDCCFBC)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Personal instructions',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Use this for stable preferences you want Conduit to remember.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF5B6672),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _personalInstructionsController,
+                    minLines: 4,
+                    maxLines: 8,
+                    decoration: InputDecoration(
+                      hintText:
+                          'Example: keep answers concise and prefer Swiss context when relevant.',
+                      filled: true,
+                      fillColor: const Color(0xFFF8F3EB),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: const BorderSide(color: Color(0xFFDCCFBC)),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -2235,6 +2299,7 @@ class _PendingTurn {
   const _PendingTurn({
     required this.clientMessageId,
     required this.text,
+    required this.context,
     required this.userMessageId,
     this.turnId,
     this.assistantMessageId,
@@ -2243,6 +2308,7 @@ class _PendingTurn {
 
   final String clientMessageId;
   final String text;
+  final _TurnContextPayload context;
   final String userMessageId;
   final String? turnId;
   final String? assistantMessageId;
@@ -2256,6 +2322,7 @@ class _PendingTurn {
     return _PendingTurn(
       clientMessageId: clientMessageId,
       text: text,
+      context: context,
       userMessageId: userMessageId,
       turnId: turnId ?? this.turnId,
       assistantMessageId: assistantMessageId ?? this.assistantMessageId,
@@ -2267,9 +2334,29 @@ class _PendingTurn {
     return _PendingTurn(
       clientMessageId: clientMessageId,
       text: text,
+      context: context,
       userMessageId: userMessageId,
     );
   }
+}
+
+class _TurnContextPayload {
+  const _TurnContextPayload({
+    required this.currentTime,
+    required this.location,
+    required this.personalInstructions,
+  });
+
+  final String currentTime;
+  final String location;
+  final String personalInstructions;
+
+  Map<String, dynamic> toJson() => {
+    'current_time': currentTime,
+    if (location.isNotEmpty) 'location': location,
+    if (personalInstructions.isNotEmpty)
+      'personal_instructions': personalInstructions,
+  };
 }
 
 class _PendingApprovalRequest {
@@ -2291,6 +2378,26 @@ String _makeClientMessageId() {
   final entropy = math.Random().nextInt(1 << 20).toRadixString(16);
   return 'm_${microseconds}_$entropy';
 }
+
+String _formatCurrentTimeForContext(DateTime value) {
+  final local = value.toLocal();
+  final offset = local.timeZoneOffset;
+  final sign = offset.isNegative ? '-' : '+';
+  final absoluteOffset = offset.abs();
+  final offsetHours = absoluteOffset.inHours;
+  final offsetMinutes = absoluteOffset.inMinutes.remainder(60);
+  final timezoneName = local.timeZoneName.trim();
+  final offsetLabel =
+      'UTC$sign${_twoDigits(offsetHours)}:${_twoDigits(offsetMinutes)}';
+  final timezoneLabel = timezoneName.isEmpty
+      ? offsetLabel
+      : '$timezoneName ($offsetLabel)';
+  return '${local.year}-${_twoDigits(local.month)}-${_twoDigits(local.day)} '
+      '${_twoDigits(local.hour)}:${_twoDigits(local.minute)}:${_twoDigits(local.second)} '
+      '$timezoneLabel';
+}
+
+String _twoDigits(int value) => value.toString().padLeft(2, '0');
 
 String _makeDraftSessionId() {
   final microseconds = DateTime.now().microsecondsSinceEpoch;

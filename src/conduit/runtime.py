@@ -143,6 +143,7 @@ class ConduitRuntime:
         session: Session,
         new_message: types.Content,
         invocation_id: str | None = None,
+        state_delta: dict[str, Any] | None = None,
     ) -> AsyncIterator[Event]:
         """Yield raw ADK events for a session invocation."""
 
@@ -151,6 +152,7 @@ class ConduitRuntime:
             session_id=session.id,
             invocation_id=invocation_id,
             new_message=new_message,
+            state_delta=state_delta,
         ):
             yield event
 
@@ -159,6 +161,7 @@ class ConduitRuntime:
         *,
         session: Session,
         message: str,
+        state_delta: dict[str, Any] | None = None,
     ) -> AsyncIterator[RuntimeTurnUpdate]:
         """Yield structured updates for a single turn."""
 
@@ -170,6 +173,7 @@ class ConduitRuntime:
         async for event in self.iter_events(
             session=session,
             new_message=types.UserContent(parts=[types.Part(text=message)]),
+            state_delta=state_delta,
         ):
             if event.author == "user":
                 continue
@@ -208,14 +212,24 @@ class ConduitRuntime:
             text=final_reply or fallback_reply,
         )
 
-    async def run_turn(self, *, message: str, session_id: str | None = None) -> TurnResult:
+    async def run_turn(
+        self,
+        *,
+        message: str,
+        session_id: str | None = None,
+        state_delta: dict[str, Any] | None = None,
+    ) -> TurnResult:
         """Run a single user turn against the ADK runner."""
 
         session = await self.get_or_create_session(session_id)
         tool_calls: list[dict[str, Any]] = []
         reply = ""
 
-        async for update in self.stream_turn(session=session, message=message):
+        async for update in self.stream_turn(
+            session=session,
+            message=message,
+            state_delta=state_delta,
+        ):
             if update.kind == "tool_call":
                 tool_calls.append(
                     {

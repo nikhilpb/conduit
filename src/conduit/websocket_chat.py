@@ -18,6 +18,8 @@ from google.genai import types
 from conduit.runtime import ConduitRuntime
 from conduit.sessions.sqlite_service import ClientTurnRecord
 from conduit.tool_permissions import permission_summary
+from conduit.user_context import build_state_delta
+from conduit.user_context import coerce_turn_context
 
 
 def _make_turn_id() -> str:
@@ -46,6 +48,7 @@ class ActiveTurn:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     seen_tool_call_ids: set[str] = field(default_factory=set)
     pending_approval_id: str | None = None
+    state_delta: dict[str, Any] = field(default_factory=dict)
     completed: bool = False
     failed: bool = False
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -151,6 +154,7 @@ class WebSocketChatManager:
         message_id = _required_string(payload, "message_id")
         content = _required_string(payload, "content")
         session_id = _optional_string(payload.get("session_id"))
+        state_delta = build_state_delta(coerce_turn_context(payload.get("context")))
         if not content:
             raise ValueError("content must be a non-empty string")
 
@@ -173,6 +177,7 @@ class WebSocketChatManager:
             message_id=message_id,
             turn_id=_make_turn_id(),
             assistant_message_id=_make_assistant_message_id(),
+            state_delta=state_delta,
         )
 
         async with self._lock:
@@ -201,6 +206,7 @@ class WebSocketChatManager:
                 turn=turn,
                 session=session,
                 new_message=types.UserContent(parts=[types.Part(text=content)]),
+                state_delta=state_delta,
             )
         )
 
@@ -242,6 +248,7 @@ class WebSocketChatManager:
                     approval_id=approval_id,
                     confirmed=confirmed,
                 ),
+                state_delta=turn.state_delta,
             )
         )
 
@@ -302,6 +309,7 @@ class WebSocketChatManager:
         turn: ActiveTurn,
         session: Session,
         new_message: types.Content,
+        state_delta: dict[str, Any] | None = None,
     ) -> None:
         final_reply = ""
         fallback_reply = ""
@@ -312,6 +320,7 @@ class WebSocketChatManager:
                 session=session,
                 invocation_id=turn.invocation_id,
                 new_message=new_message,
+                state_delta=state_delta,
             ):
                 if event.author == "user":
                     continue

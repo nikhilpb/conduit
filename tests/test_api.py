@@ -5,6 +5,10 @@ from google.genai import types
 from conduit.config import Settings
 from conduit.main import _build_transcript
 from conduit.main import create_app
+from conduit.runtime import TurnResult
+from conduit.user_context import CURRENT_TIME_STATE_KEY
+from conduit.user_context import LOCATION_STATE_KEY
+from conduit.user_context import PERSONAL_INSTRUCTIONS_STATE_KEY
 
 
 def test_health_reports_runtime_configuration(monkeypatch, tmp_path):
@@ -153,6 +157,55 @@ def test_model_settings_can_be_listed_and_updated(tmp_path):
     assert health_response.json()["model_label"] == "Gemini 3 Flash"
     assert health_response.json()["provider"] == "google"
     assert health_response.json()["provider_api_key_configured"] is True
+
+
+def test_chat_passes_turn_context_into_runtime_state(tmp_path):
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+        )
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_run_turn(*, message: str, session_id: str | None = None, state_delta=None):
+        captured["message"] = message
+        captured["session_id"] = session_id
+        captured["state_delta"] = dict(state_delta or {})
+        return TurnResult(
+            session_id=session_id or "session-1",
+            reply="ok",
+            tool_calls=[],
+        )
+
+    app.state.runtime.run_turn = fake_run_turn  # type: ignore[method-assign]
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "session_id": "session-1",
+            "message": "What should I do next?",
+            "context": {
+                "current_time": "2026-03-10 20:00:00 CET (UTC+01:00)",
+                "location": "Zurich, Switzerland",
+                "personal_instructions": "Keep the answer short.",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "message": "What should I do next?",
+        "session_id": "session-1",
+        "state_delta": {
+            CURRENT_TIME_STATE_KEY: "2026-03-10 20:00:00 CET (UTC+01:00)",
+            LOCATION_STATE_KEY: "Zurich, Switzerland",
+            PERSONAL_INSTRUCTIONS_STATE_KEY: "Keep the answer short.",
+        },
+    }
+    assert response.json()["reply"] == "ok"
 
 
 def test_build_transcript_includes_thinking_trace():

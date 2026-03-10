@@ -51,9 +51,16 @@ class SessionDetailResponse(BaseModel):
     messages: list[TranscriptMessage] = Field(default_factory=list)
 
 
+class ChatContextRequest(BaseModel):
+    current_time: str = ""
+    location: str = ""
+    personal_instructions: str = ""
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     session_id: str | None = None
+    context: ChatContextRequest | None = None
 
 
 class ChatResponse(BaseModel):
