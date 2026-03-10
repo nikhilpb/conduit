@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     app_name: str = "conduit"
     model: str = "claude-sonnet-4-6"
+    models_config_path: str = "config/models.yaml"
     host: str = "0.0.0.0"
     port: int = 18423
     db_path: str = "data/conduit.db"
@@ -52,32 +53,20 @@ class Settings(BaseSettings):
         repr=False,
     )
 
-    @property
-    def provider(self) -> str:
-        """Return the active model provider inferred from the model name."""
-
-        model = self.model.lower()
-        if model.startswith("claude-"):
-            return "anthropic"
-        if model.startswith("gemini"):
-            return "google"
-        return "unknown"
-
-    @property
-    def provider_api_key_configured(self) -> bool:
-        """Return whether the active provider has credentials configured."""
-
-        if self.provider == "anthropic":
-            return bool(self.anthropic_api_key)
-        if self.provider == "google":
-            return bool(self.google_api_key)
-        return False
-
     @cached_property
     def tool_permissions(self) -> dict[str, str]:
         """Return the resolved per-tool permission policy."""
 
         return load_tool_permissions(self.tool_permissions_path)
+
+    def provider_api_key_configured_for(self, provider: str) -> bool:
+        """Return whether a given provider has credentials configured."""
+
+        if provider == "anthropic":
+            return bool(self.anthropic_api_key)
+        if provider == "google":
+            return bool(self.google_api_key)
+        return False
 
 
 @lru_cache(maxsize=1)

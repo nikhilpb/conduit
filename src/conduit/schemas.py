@@ -12,6 +12,7 @@ class HealthResponse(BaseModel):
     ok: bool
     app_name: str
     model: str
+    model_label: str
     provider: str
     provider_api_key_configured: bool
 
@@ -58,3 +59,23 @@ class ChatResponse(BaseModel):
     session_id: str
     reply: str
     tool_calls: list[ToolCall] = Field(default_factory=list)
+
+
+class ModelOptionResponse(BaseModel):
+    key: str
+    label: str
+    model: str
+    provider: str
+    available: bool
+
+
+class ModelSettingsResponse(BaseModel):
+    active_key: str
+    active_model: str
+    active_label: str
+    provider: str
+    options: list[ModelOptionResponse] = Field(default_factory=list)
+
+
+class UpdateModelRequest(BaseModel):
+    model_key: str = Field(min_length=1)

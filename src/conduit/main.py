@@ -19,11 +19,14 @@ from conduit.schemas import ChatRequest
 from conduit.schemas import ChatResponse
 from conduit.schemas import CreateSessionResponse
 from conduit.schemas import HealthResponse
+from conduit.schemas import ModelOptionResponse
+from conduit.schemas import ModelSettingsResponse
 from conduit.schemas import SessionDetailResponse
 from conduit.schemas import SessionListResponse
 from conduit.schemas import SessionResponse
 from conduit.schemas import TranscriptMessage
 from conduit.schemas import ToolCall
+from conduit.schemas import UpdateModelRequest
 from conduit.websocket_chat import WebSocketChatManager
 
 
@@ -45,13 +48,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
+        active_model = runtime.active_model
         return HealthResponse(
             ok=True,
             app_name=resolved_settings.app_name,
-            model=resolved_settings.model,
-            provider=resolved_settings.provider,
-            provider_api_key_configured=resolved_settings.provider_api_key_configured,
+            model=active_model.model,
+            model_label=active_model.label,
+            provider=active_model.provider,
+            provider_api_key_configured=resolved_settings.provider_api_key_configured_for(
+                active_model.provider
+            ),
         )
+
+    @app.get("/settings/model", response_model=ModelSettingsResponse)
+    async def get_model_settings() -> ModelSettingsResponse:
+        return _build_model_settings_response(runtime)
+
+    @app.put("/settings/model", response_model=ModelSettingsResponse)
+    async def update_model_settings(payload: UpdateModelRequest) -> ModelSettingsResponse:
+        try:
+            await runtime.set_active_model(payload.model_key)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _build_model_settings_response(runtime)
 
     @app.post("/sessions", response_model=CreateSessionResponse, status_code=201)
     async def create_session() -> CreateSessionResponse:
@@ -190,6 +211,29 @@ async def _websocket_writer(websocket: WebSocket, queue: asyncio.Queue[dict]) ->
     while True:
         event = await queue.get()
         await websocket.send_json(event)
+
+
+def _build_model_settings_response(runtime: ConduitRuntime) -> ModelSettingsResponse:
+    registry = runtime.model_registry
+    active = registry.active
+    return ModelSettingsResponse(
+        active_key=active.key,
+        active_model=active.model,
+        active_label=active.label,
+        provider=active.provider,
+        options=[
+            ModelOptionResponse(
+                key=option.key,
+                label=option.label,
+                model=option.model,
+                provider=option.provider,
+                available=runtime.settings.provider_api_key_configured_for(
+                    option.provider
+                ),
+            )
+            for option in registry.options
+        ],
+    )
 
 
 app = create_app()

@@ -218,7 +218,12 @@ class ConduitAnthropicLlm(AnthropicLlm):
             system_instruction = llm_request.config.system_instruction
 
         extra_headers = None
-        if self.interleaved_thinking and llm_request.tools_dict:
+        model_name = (llm_request.model or "").lower()
+        if (
+            self.interleaved_thinking
+            and llm_request.tools_dict
+            and model_name.startswith("claude-sonnet-4-6")
+        ):
             extra_headers = {"anthropic-beta": _INTERLEAVED_THINKING_BETA}
 
         message = await self._anthropic_client.messages.create(

@@ -1193,7 +1193,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _saving = false;
   HealthStatus? _health;
+  ModelSettings? _modelSettings;
+  String? _selectedModelKey;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final candidate = widget.currentServerUrl?.trim() ?? '';
+    if (candidate.isNotEmpty) {
+      unawaited(_loadServerState(candidate));
+    }
+  }
 
   @override
   void dispose() {
@@ -1201,8 +1212,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  Future<void> _testConnection() async {
-    final candidate = _controller.text.trim();
+  Future<void> _testConnection() async =>
+      _loadServerState(_controller.text.trim());
+
+  Future<void> _loadServerState(String candidate) async {
     if (candidate.isEmpty) {
       setState(() {
         _error = 'Enter a server URL first.';
@@ -1217,21 +1230,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final client = ConduitApiClient(baseUrl: candidate);
-      final health = await client.health();
-      if (!mounted) {
+      final results = await Future.wait<Object>([
+        client.health(),
+        client.getModelSettings(),
+      ]);
+      if (!mounted || _controller.text.trim() != candidate) {
         return;
       }
+
+      final health = results[0] as HealthStatus;
+      final modelSettings = results[1] as ModelSettings;
       setState(() {
         _health = health;
+        _modelSettings = modelSettings;
+        _selectedModelKey = modelSettings.activeKey;
         _saving = false;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || _controller.text.trim() != candidate) {
         return;
       }
       setState(() {
         _error = '$error';
         _health = null;
+        _modelSettings = null;
+        _selectedModelKey = null;
         _saving = false;
       });
     }
@@ -1253,14 +1276,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final client = ConduitApiClient(baseUrl: candidate);
-      final health = await client.health();
+      var health = await client.health();
+      var modelSettings = await client.getModelSettings();
+      final selectedModelKey = _selectedModelKey ?? modelSettings.activeKey;
+      if (selectedModelKey != modelSettings.activeKey) {
+        modelSettings = await client.updateModel(selectedModelKey);
+        health = await client.health();
+      }
+
       await widget.settingsStore.saveServerUrl(candidate);
       if (!mounted) {
         return;
       }
+
+      setState(() {
+        _health = health;
+        _modelSettings = modelSettings;
+        _selectedModelKey = modelSettings.activeKey;
+        _saving = false;
+      });
       Navigator.of(context).pop<String>(_controller.text.trim());
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Connected to ${health.appName}.')),
+        SnackBar(
+          content: Text(
+            'Connected to ${health.appName} on ${modelSettings.activeLabel}.',
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -1300,6 +1341,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     controller: _controller,
                     keyboardType: TextInputType.url,
                     autocorrect: false,
+                    onChanged: (_) {
+                      setState(() {
+                        _health = null;
+                        _modelSettings = null;
+                        _selectedModelKey = null;
+                        _error = null;
+                      });
+                    },
                     decoration: InputDecoration(
                       hintText: 'http://100.x.y.z:18423',
                       filled: true,
@@ -1342,6 +1391,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+          if (_modelSettings != null) ...[
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Base model', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(
+                      'This setting is stored on the server and applies to future turns.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF5B6672),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedModelKey,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: const Color(0xFFF8F3EB),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFDCCFBC),
+                          ),
+                        ),
+                      ),
+                      items: _modelSettings!.options
+                          .map(
+                            (option) => DropdownMenuItem<String>(
+                              value: option.key,
+                              enabled: option.available,
+                              child: Text(
+                                option.available
+                                    ? option.label
+                                    : '${option.label} (missing API key)',
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _saving
+                          ? null
+                          : (value) {
+                              if (value == null) {
+                                return;
+                              }
+                              setState(() {
+                                _selectedModelKey = value;
+                              });
+                            },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (_health != null) ...[
             const SizedBox(height: 16),
             Card(
@@ -1356,7 +1463,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 10),
                     Text('App: ${_health!.appName}'),
-                    Text('Model: ${_health!.model}'),
+                    Text(
+                      'Model: ${_health!.modelLabel.isNotEmpty ? _health!.modelLabel : _health!.model}',
+                    ),
                     Text('Provider: ${_health!.provider}'),
                   ],
                 ),

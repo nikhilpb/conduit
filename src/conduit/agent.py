@@ -6,20 +6,22 @@ from google.adk.tools.tool_context import ToolContext
 
 from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
 from conduit.config import Settings
+from conduit.model_registry import infer_provider
 from conduit.tool_permissions import permission_summary
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
 
 
-def build_root_agent(settings: Settings) -> Agent:
+def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
     """Build the single-agent runtime used by the API and ADK Web."""
 
     web_search = build_web_search_tool(settings)
     web_fetch = build_web_fetch_tool(settings)
-    model = settings.model
-    if settings.provider == "anthropic":
+    provider = infer_provider(model_name)
+    model = model_name
+    if provider == "anthropic":
         model = ConduitAnthropicLlm(
-            model=settings.model,
+            model=model_name,
             max_tokens=settings.anthropic_max_tokens,
             thinking_budget_tokens=settings.anthropic_thinking_budget_tokens,
             interleaved_thinking=settings.anthropic_interleaved_thinking,
@@ -30,9 +32,8 @@ def build_root_agent(settings: Settings) -> Agent:
         model=model,
         description="A personal assistant that can search the web and fetch webpages.",
         instruction=(
-            "You are Conduit, a concise research assistant. "
+            "You are Conduit, a research assistant. "
             "Use web_search when you need to discover fresh information. "
-            "Start with one focused web_search query and only retry if the tool reports an error or clearly irrelevant results. "
             "Use web_fetch when you need to inspect a specific page or URL in detail. "
             "Prefer citing concrete facts from fetched pages when possible. "
             "If you are uncertain, say so directly."

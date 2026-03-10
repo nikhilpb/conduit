@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from dataclasses import field
 from typing import AsyncIterator
@@ -18,6 +19,10 @@ from google.genai import types
 
 from conduit.agent import build_root_agent
 from conduit.config import Settings
+from conduit.model_registry import ModelOption
+from conduit.model_registry import ModelRegistry
+from conduit.model_registry import persist_model_registry
+from conduit.model_registry import load_model_registry
 from conduit.sessions import SQLiteSessionService
 
 
@@ -43,15 +48,38 @@ class ConduitRuntime:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.session_service = SQLiteSessionService(settings.db_path)
-        self.app = App(
-            name=settings.app_name,
-            root_agent=build_root_agent(settings),
-            resumability_config=ResumabilityConfig(is_resumable=True),
+        self._model_lock = asyncio.Lock()
+        self._model_registry = load_model_registry(
+            settings.models_config_path,
+            fallback_model=settings.model,
         )
-        self.runner = Runner(
-            app=self.app,
-            session_service=self.session_service,
-        )
+        persist_model_registry(settings.models_config_path, self._model_registry)
+        self._apply_model_registry(self._model_registry)
+
+    @property
+    def active_model(self) -> ModelOption:
+        return self._model_registry.active
+
+    @property
+    def model_registry(self) -> ModelRegistry:
+        return self._model_registry
+
+    async def set_active_model(self, model_key: str) -> ModelOption:
+        """Persist and activate a new base model."""
+
+        async with self._model_lock:
+            registry = self._model_registry.with_active(model_key)
+            if not self.settings.provider_api_key_configured_for(
+                registry.active.provider
+            ):
+                raise ValueError(
+                    f"{registry.active.provider} credentials are not configured."
+                )
+
+            persist_model_registry(self.settings.models_config_path, registry)
+            self._model_registry = registry
+            self._apply_model_registry(registry)
+            return registry.active
 
     async def create_session(self, session_id: str | None = None) -> Session:
         """Create a new chat session."""
@@ -202,6 +230,20 @@ class ConduitRuntime:
             session_id=session.id,
             reply=reply,
             tool_calls=tool_calls,
+        )
+
+    def _apply_model_registry(self, registry: ModelRegistry) -> None:
+        self.app = App(
+            name=self.settings.app_name,
+            root_agent=build_root_agent(
+                self.settings,
+                model_name=registry.active.model,
+            ),
+            resumability_config=ResumabilityConfig(is_resumable=True),
+        )
+        self.runner = Runner(
+            app=self.app,
+            session_service=self.session_service,
         )
 
 

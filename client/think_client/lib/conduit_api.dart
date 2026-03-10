@@ -12,11 +12,10 @@ class ConduitApiClient {
     required String baseUrl,
     http.Client? httpClient,
     WebSocketChannelFactory? webSocketChannelFactory,
-  })
-    : _baseUrl = _normalizeBaseUrl(baseUrl),
-      _httpClient = httpClient ?? http.Client(),
-      _webSocketChannelFactory =
-          webSocketChannelFactory ?? WebSocketChannel.connect;
+  }) : _baseUrl = _normalizeBaseUrl(baseUrl),
+       _httpClient = httpClient ?? http.Client(),
+       _webSocketChannelFactory =
+           webSocketChannelFactory ?? WebSocketChannel.connect;
 
   final String _baseUrl;
   final http.Client _httpClient;
@@ -25,6 +24,20 @@ class ConduitApiClient {
   Future<HealthStatus> health() async {
     final response = await _httpClient.get(_uri('/health'));
     return HealthStatus.fromJson(_decodeJson(response));
+  }
+
+  Future<ModelSettings> getModelSettings() async {
+    final response = await _httpClient.get(_uri('/settings/model'));
+    return ModelSettings.fromJson(_decodeJson(response));
+  }
+
+  Future<ModelSettings> updateModel(String modelKey) async {
+    final response = await _httpClient.put(
+      _uri('/settings/model'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'model_key': modelKey}),
+    );
+    return ModelSettings.fromJson(_decodeJson(response));
   }
 
   Future<List<SessionSummary>> listSessions() async {
@@ -124,8 +137,8 @@ class ConduitChatSocket {
   ConduitChatSocket._(WebSocketChannel channel)
     : _channel = channel,
       events = channel.stream
-            .map((message) => _decodeSocketMessage(message))
-            .asBroadcastStream();
+          .map((message) => _decodeSocketMessage(message))
+          .asBroadcastStream();
 
   final WebSocketChannel _channel;
   final Stream<ChatServerEvent> events;
@@ -150,5 +163,7 @@ ChatServerEvent _decodeSocketMessage(dynamic message) {
       Map<String, dynamic>.from(jsonDecode(utf8.decode(message)) as Map),
     );
   }
-  throw FormatException('Unsupported websocket payload type: ${message.runtimeType}');
+  throw FormatException(
+    'Unsupported websocket payload type: ${message.runtimeType}',
+  );
 }

@@ -3,6 +3,7 @@ class HealthStatus {
     required this.ok,
     required this.appName,
     required this.model,
+    required this.modelLabel,
     required this.provider,
   });
 
@@ -11,6 +12,7 @@ class HealthStatus {
       ok: json['ok'] as bool? ?? false,
       appName: json['app_name'] as String? ?? 'Conduit',
       model: json['model'] as String? ?? '',
+      modelLabel: json['model_label'] as String? ?? '',
       provider: json['provider'] as String? ?? '',
     );
   }
@@ -18,6 +20,7 @@ class HealthStatus {
   final bool ok;
   final String appName;
   final String model;
+  final String modelLabel;
   final String provider;
 }
 
@@ -201,4 +204,58 @@ class ChatServerEvent {
   final String? message;
 
   bool get isTerminal => type == 'done' || type == 'error';
+}
+
+class ModelOption {
+  const ModelOption({
+    required this.key,
+    required this.label,
+    required this.model,
+    required this.provider,
+    required this.available,
+  });
+
+  factory ModelOption.fromJson(Map<String, dynamic> json) {
+    return ModelOption(
+      key: json['key'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      model: json['model'] as String? ?? '',
+      provider: json['provider'] as String? ?? '',
+      available: json['available'] as bool? ?? false,
+    );
+  }
+
+  final String key;
+  final String label;
+  final String model;
+  final String provider;
+  final bool available;
+}
+
+class ModelSettings {
+  const ModelSettings({
+    required this.activeKey,
+    required this.activeModel,
+    required this.activeLabel,
+    required this.provider,
+    required this.options,
+  });
+
+  factory ModelSettings.fromJson(Map<String, dynamic> json) {
+    return ModelSettings(
+      activeKey: json['active_key'] as String? ?? '',
+      activeModel: json['active_model'] as String? ?? '',
+      activeLabel: json['active_label'] as String? ?? '',
+      provider: json['provider'] as String? ?? '',
+      options: (json['options'] as List<dynamic>? ?? const [])
+          .map((item) => ModelOption.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  final String activeKey;
+  final String activeModel;
+  final String activeLabel;
+  final String provider;
+  final List<ModelOption> options;
 }
