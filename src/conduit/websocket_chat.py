@@ -364,6 +364,18 @@ class WebSocketChatManager:
                 if event.actions.requested_tool_confirmations:
                     continue
 
+                thought = _extract_thought_text(event.content)
+                if thought:
+                    await turn.publish(
+                        {
+                            "type": "thought",
+                            "turn_id": turn.turn_id,
+                            "message_id": turn.assistant_message_id,
+                            "content": thought,
+                            "agent": "conduit",
+                        }
+                    )
+
                 text = _extract_text(event.content)
                 if not text:
                     continue
@@ -461,6 +473,18 @@ def _extract_text(content: types.Content | None) -> str:
         if part.text and not getattr(part, "thought", False)
     ]
     return "\n".join(part for part in parts if part).strip()
+
+
+def _extract_thought_text(content: types.Content | None) -> str:
+    if content is None or not content.parts:
+        return ""
+
+    parts = [
+        part.text.strip()
+        for part in content.parts
+        if part.text and getattr(part, "thought", False)
+    ]
+    return "\n\n".join(part for part in parts if part).strip()
 
 
 def _extract_approval_required_event(

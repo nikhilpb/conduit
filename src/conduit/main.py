@@ -152,6 +152,7 @@ def _build_transcript(events) -> list[TranscriptMessage]:
             continue
 
         text_parts: list[str] = []
+        thinking_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for part in parts:
             if getattr(part, "function_call", None):
@@ -163,9 +164,12 @@ def _build_transcript(events) -> list[TranscriptMessage]:
                 )
             if part.text and not getattr(part, "thought", False):
                 text_parts.append(part.text.strip())
+            if part.text and getattr(part, "thought", False):
+                thinking_parts.append(part.text.strip())
 
         text = "\n".join(part for part in text_parts if part).strip()
-        if not text and not tool_calls:
+        thinking_trace = "\n\n".join(part for part in thinking_parts if part).strip()
+        if not text and not tool_calls and not thinking_trace:
             continue
 
         messages.append(
@@ -174,6 +178,7 @@ def _build_transcript(events) -> list[TranscriptMessage]:
                 role="user" if event.author == "user" else "assistant",
                 text=text,
                 created_at=event.timestamp,
+                thinking_trace=thinking_trace,
                 tool_calls=tool_calls,
             )
         )

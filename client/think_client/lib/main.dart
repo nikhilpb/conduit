@@ -214,11 +214,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
       }
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
-          builder: (context) => ChatScreen(
-            client: client,
-            sessionId: sessionId,
-            serverUrl: widget.serverUrl!,
-          ),
+          builder: (context) =>
+              ChatScreen(client: client, sessionId: sessionId),
         ),
       );
       await _refresh();
@@ -237,11 +234,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
     }
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (context) => ChatScreen(
-          client: client,
-          sessionId: session.sessionId,
-          serverUrl: widget.serverUrl!,
-        ),
+        builder: (context) =>
+            ChatScreen(client: client, sessionId: session.sessionId),
       ),
     );
     await _refresh();
@@ -317,8 +311,6 @@ class _SessionListScreenState extends State<SessionListScreen> {
             if (serverUrl == null || serverUrl.trim().isEmpty)
               EmptyServerCard(onConfigure: _openSettings)
             else ...[
-                  OverviewCard(health: _health),
-              const SizedBox(height: 16),
               if (_loading)
                 const Center(
                   child: Padding(
@@ -366,16 +358,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
 }
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({
-    super.key,
-    required this.client,
-    required this.sessionId,
-    required this.serverUrl,
-  });
+  const ChatScreen({super.key, required this.client, required this.sessionId});
 
   final ConduitApiClient client;
   final String sessionId;
-  final String serverUrl;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -455,16 +441,26 @@ class _ChatScreenState extends State<ChatScreen> {
 
     final clientMessageId = _makeClientMessageId();
     final now = DateTime.now().millisecondsSinceEpoch / 1000;
+    final assistantMessageId = 'local-assistant-$clientMessageId';
     final optimisticMessage = TranscriptMessage(
       messageId: 'local-user-$clientMessageId',
       role: 'user',
       text: text,
       createdAt: now,
+      thinkingTrace: '',
+      toolCalls: const [],
+    );
+    final optimisticAssistantMessage = TranscriptMessage(
+      messageId: assistantMessageId,
+      role: 'assistant',
+      text: '',
+      createdAt: now,
+      thinkingTrace: '',
       toolCalls: const [],
     );
 
     setState(() {
-      _messages = [..._messages, optimisticMessage];
+      _messages = [..._messages, optimisticMessage, optimisticAssistantMessage];
       _error = null;
       _connectionError = null;
       _pendingTurns = {
@@ -473,6 +469,7 @@ class _ChatScreenState extends State<ChatScreen> {
           clientMessageId: clientMessageId,
           text: text,
           userMessageId: optimisticMessage.messageId,
+          assistantMessageId: assistantMessageId,
         ),
       };
       _composer.clear();
@@ -615,6 +612,9 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'tool_call':
         _handleToolCall(event);
         return;
+      case 'thought':
+        _handleThought(event);
+        return;
       case 'token':
         _handleToken(event);
         return;
@@ -713,6 +713,33 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
   }
 
+  void _handleThought(ChatServerEvent event) {
+    final clientMessageId = _clientMessageIdForTurn(event.turnId);
+    final content = event.content;
+    if (clientMessageId == null || content == null || content.isEmpty) {
+      return;
+    }
+    final pendingTurn = _pendingTurns[clientMessageId];
+    if (pendingTurn == null) {
+      return;
+    }
+
+    final assistantMessageId = _assistantMessageIdForPending(
+      pendingTurn,
+      serverMessageId: event.messageId,
+    );
+    final existing = _messageById(assistantMessageId);
+    final separator = (existing?.thinkingTrace.isNotEmpty ?? false)
+        ? '\n\n'
+        : '';
+    _updateAssistantMessage(
+      clientMessageId: clientMessageId,
+      assistantMessageId: assistantMessageId,
+      thinkingTrace: '${existing?.thinkingTrace ?? ''}$separator$content',
+    );
+    _scrollToBottom();
+  }
+
   void _handleDone(ChatServerEvent event) {
     final clientMessageId = _clientMessageIdForTurn(event.turnId);
     if (clientMessageId == null) {
@@ -778,6 +805,14 @@ class _ChatScreenState extends State<ChatScreen> {
           nextTurnMap.remove(pendingTurn!.turnId);
         }
         _clientMessageIdByTurnId = nextTurnMap;
+        if (pendingTurn?.assistantMessageId != null) {
+          _messages = _messages
+              .where(
+                (message) =>
+                    message.messageId != pendingTurn!.assistantMessageId,
+              )
+              .toList();
+        }
       });
     }
 
@@ -822,10 +857,27 @@ class _ChatScreenState extends State<ChatScreen> {
     return message?.toolCalls ?? const [];
   }
 
+  bool _isAssistantMessagePending(TranscriptMessage message) {
+    if (message.isUser) {
+      return false;
+    }
+    for (final turn in _pendingTurns.values) {
+      if (turn.assistantMessageId != message.messageId) {
+        continue;
+      }
+      if (_pendingApproval != null && _pendingApproval!.turnId == turn.turnId) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
   void _updateAssistantMessage({
     required String clientMessageId,
     required String assistantMessageId,
     String? text,
+    String? thinkingTrace,
     List<ToolCall>? toolCalls,
     List<String>? seenToolCallIds,
   }) {
@@ -849,11 +901,13 @@ class _ChatScreenState extends State<ChatScreen> {
             role: 'assistant',
             text: '',
             createdAt: DateTime.now().millisecondsSinceEpoch / 1000,
+            thinkingTrace: '',
             toolCalls: const [],
           );
     final updatedMessage = existingMessage.copyWith(
       messageId: assistantMessageId,
       text: text ?? existingMessage.text,
+      thinkingTrace: thinkingTrace ?? existingMessage.thinkingTrace,
       toolCalls: toolCalls ?? existingMessage.toolCalls,
     );
 
@@ -911,7 +965,9 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     if (socket == null) {
-      _showSnackBar('Chat connection is offline. Approval will be retried once reconnects succeed.');
+      _showSnackBar(
+        'Chat connection is offline. Approval will be retried once reconnects succeed.',
+      );
       return;
     }
 
@@ -956,25 +1012,15 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  bool _isConnectionHealthy() => _connectionState == _ChatConnectionState.connected;
+  bool _isConnectionHealthy() =>
+      _connectionState == _ChatConnectionState.connected;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 20,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Session ${widget.sessionId.substring(0, 8)}'),
-            Text(
-              _trimServerUrl(widget.serverUrl),
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: const Color(0xFF6B7280)),
-            ),
-          ],
-        ),
+        title: Text('Session ${widget.sessionId.substring(0, 8)}'),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1018,7 +1064,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                     itemBuilder: (context, index) {
-                      return MessageBubble(message: _messages[index]);
+                      final message = _messages[index];
+                      return MessageBubble(
+                        message: message,
+                        isPending: _isAssistantMessagePending(message),
+                      );
                     },
                     separatorBuilder: (context, index) =>
                         const SizedBox(height: 10),
@@ -1360,49 +1410,6 @@ class EmptyServerCard extends StatelessWidget {
   }
 }
 
-class OverviewCard extends StatelessWidget {
-  const OverviewCard({
-    super.key,
-    required this.health,
-  });
-
-  final HealthStatus? health;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFE2D6),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: const Icon(Icons.psychology_alt_outlined),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    health?.appName ?? 'Conduit',
-                    style: theme.textTheme.headlineSmall,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class EmptySessionsCard extends StatelessWidget {
   const EmptySessionsCard({super.key});
 
@@ -1519,9 +1526,14 @@ class SessionCard extends StatelessWidget {
 }
 
 class MessageBubble extends StatelessWidget {
-  const MessageBubble({super.key, required this.message});
+  const MessageBubble({
+    super.key,
+    required this.message,
+    this.isPending = false,
+  });
 
   final TranscriptMessage message;
+  final bool isPending;
 
   @override
   Widget build(BuildContext context) {
@@ -1561,6 +1573,13 @@ class MessageBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (!isUser && message.thinkingTrace.isNotEmpty) ...[
+                ThoughtTraceCard(trace: message.thinkingTrace),
+                if (message.text.isNotEmpty ||
+                    message.toolCalls.isNotEmpty ||
+                    isPending)
+                  const SizedBox(height: 10),
+              ],
               if (message.text.isNotEmpty)
                 isUser
                     ? SelectableText(
@@ -1590,6 +1609,13 @@ class MessageBubble extends StatelessWidget {
                             ToolChip(toolCall: toolCall, isUser: isUser),
                       )
                       .toList(),
+                ),
+              ],
+              if (isPending) ...[
+                if (message.text.isNotEmpty || message.toolCalls.isNotEmpty)
+                  const SizedBox(height: 10),
+                PendingReplyIndicator(
+                  color: isUser ? Colors.white70 : const Color(0xFF7B4B2A),
                 ),
               ],
             ],
@@ -1680,12 +1706,95 @@ class _ApprovalCard extends StatelessWidget {
   }
 }
 
+class ThoughtTraceCard extends StatefulWidget {
+  const ThoughtTraceCard({super.key, required this.trace});
+
+  final String trace;
+
+  @override
+  State<ThoughtTraceCard> createState() => _ThoughtTraceCardState();
+}
+
+class _ThoughtTraceCardState extends State<ThoughtTraceCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F3EB),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE6DDCF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () {
+              setState(() {
+                _expanded = !_expanded;
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.psychology_alt_outlined,
+                    size: 18,
+                    color: Color(0xFF7B4B2A),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Thinking trace',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: const Color(0xFF7B4B2A),
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    color: const Color(0xFF7B4B2A),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: SelectableText(
+                widget.trace,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF5B6672),
+                  height: 1.5,
+                ),
+              ),
+            ),
+            crossFadeState: _expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 180),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 String _sessionMeta(SessionSummary session) {
   final timestamp = _formatTimestamp(session.lastUpdateTime);
   if (session.eventCount <= 0) {
     return timestamp;
   }
-  final label = session.eventCount == 1 ? '1 event' : '${session.eventCount} events';
+  final label = session.eventCount == 1
+      ? '1 event'
+      : '${session.eventCount} events';
   return '$timestamp • $label';
 }
 
@@ -1732,12 +1841,7 @@ MarkdownStyleSheet _assistantMarkdownStyleSheet(
       border: Border.all(color: const Color(0xFFE6DDCF)),
     ),
     horizontalRuleDecoration: const BoxDecoration(
-      border: Border(
-        top: BorderSide(
-          color: Color(0xFFE6DDCF),
-          width: 1.5,
-        ),
-      ),
+      border: Border(top: BorderSide(color: Color(0xFFE6DDCF), width: 1.5)),
     ),
     listBullet: bodyStyle,
     a: theme.textTheme.bodyLarge?.copyWith(
@@ -1777,7 +1881,7 @@ class ToolChip extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            toolCall.name,
+            _toolCallLabel(toolCall),
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
               color: isUser ? Colors.white : const Color(0xFF7B4B2A),
             ),
@@ -1786,6 +1890,82 @@ class ToolChip extends StatelessWidget {
       ),
     );
   }
+}
+
+class PendingReplyIndicator extends StatefulWidget {
+  const PendingReplyIndicator({super.key, required this.color});
+
+  final Color color;
+
+  @override
+  State<PendingReplyIndicator> createState() => _PendingReplyIndicatorState();
+}
+
+class _PendingReplyIndicatorState extends State<PendingReplyIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final phase = (_controller.value * 3).floor() % 3;
+        final dots = '.' * (phase + 1);
+        return Text(
+          dots,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            color: widget.color,
+            letterSpacing: 2,
+          ),
+        );
+      },
+    );
+  }
+}
+
+String _toolCallLabel(ToolCall toolCall) {
+  switch (toolCall.name) {
+    case 'web_search':
+      final query = _ellipsize(
+        (toolCall.args['query'] as String?)?.trim() ?? 'query',
+        38,
+      );
+      return 'web_search($query)';
+    case 'web_fetch':
+      final url = (toolCall.args['url'] as String?)?.trim() ?? 'url';
+      return 'web_fetch(${_shortenUrl(url)})';
+    default:
+      return toolCall.name;
+  }
+}
+
+String _shortenUrl(String url) {
+  try {
+    final uri = Uri.parse(url);
+    final host = uri.host.isEmpty ? url : uri.host;
+    final path = uri.path == '/' ? '' : uri.path;
+    final compact = '$host$path';
+    return _ellipsize(compact, 34);
+  } catch (_) {
+    return _ellipsize(url, 34);
+  }
+}
+
+String _ellipsize(String value, int maxLength) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return '${value.substring(0, maxLength - 1)}…';
 }
 
 class StatusBadge extends StatelessWidget {
@@ -1903,12 +2083,6 @@ String _formatTimestamp(double seconds) {
   final month = value.month.toString().padLeft(2, '0');
   final day = value.day.toString().padLeft(2, '0');
   return '${value.year}-$month-$day $hh:$mm';
-}
-
-String _trimServerUrl(String value) {
-  return value
-      .replaceFirst(RegExp(r'^https?://'), '')
-      .replaceFirst(RegExp(r'/$'), '');
 }
 
 String? _fallbackServerUrl() {

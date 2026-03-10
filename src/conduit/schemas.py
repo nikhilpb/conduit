@@ -40,6 +40,7 @@ class TranscriptMessage(BaseModel):
     role: str
     text: str
     created_at: float
+    thinking_trace: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
 
 

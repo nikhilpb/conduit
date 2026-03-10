@@ -20,6 +20,7 @@ class FakeRuntime:
         *,
         db_path: str,
         reply: str,
+        thought_trace: str = "",
         delay_seconds: float = 0.0,
         require_approval: bool = False,
     ):
@@ -29,6 +30,7 @@ class FakeRuntime:
         )
         self.session_service = SQLiteSessionService(db_path)
         self.reply = reply
+        self.thought_trace = thought_trace
         self.delay_seconds = delay_seconds
         self.require_approval = require_approval
         self.iter_event_calls = 0
@@ -88,14 +90,18 @@ class FakeRuntime:
             return
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
+        if self.thought_trace:
+            yield _thought_event(self.thought_trace)
         yield _text_event(self.reply)
 
 
 def test_websocket_turn_streams_ack_tool_calls_tokens_and_done(tmp_path):
     reply = "This reply is long enough to be chunked into multiple token events."
+    thought_trace = "Search the query, inspect candidates, then summarize."
     app, runtime = _create_websocket_test_app(
         tmp_path=tmp_path,
         reply=reply,
+        thought_trace=thought_trace,
     )
     client = TestClient(app)
 
@@ -113,6 +119,9 @@ def test_websocket_turn_streams_ack_tool_calls_tokens_and_done(tmp_path):
     assert events[0]["message_id"] == "m1"
     assert events[0]["session_id"]
     assert any(event["type"] == "tool_call" for event in events)
+    assert [event["content"] for event in events if event["type"] == "thought"] == [
+        thought_trace
+    ]
     assert "".join(
         event["content"] for event in events if event["type"] == "token"
     ) == reply
@@ -250,6 +259,7 @@ def _create_websocket_test_app(
     *,
     tmp_path,
     reply: str,
+    thought_trace: str = "",
     delay_seconds: float = 0.0,
     require_approval: bool = False,
 ):
@@ -262,6 +272,7 @@ def _create_websocket_test_app(
     runtime = FakeRuntime(
         db_path=str(tmp_path / "websocket.db"),
         reply=reply,
+        thought_trace=thought_trace,
         delay_seconds=delay_seconds,
         require_approval=require_approval,
     )
@@ -345,6 +356,17 @@ def _text_event(text: str) -> Event:
         content=types.Content(
             role="model",
             parts=[types.Part(text=text)],
+        ),
+    )
+
+
+def _thought_event(text: str) -> Event:
+    return Event(
+        invocation_id="inv-test",
+        author="conduit",
+        content=types.Content(
+            role="model",
+            parts=[types.Part(text=text, thought=True)],
         ),
     )
 

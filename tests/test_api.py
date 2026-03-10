@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
+from google.adk.events.event import Event
+from google.genai import types
 
 from conduit.config import Settings
+from conduit.main import _build_transcript
 from conduit.main import create_app
 
 
@@ -50,3 +53,27 @@ def test_create_and_list_sessions(tmp_path):
         "session_id": session_id,
         "messages": [],
     }
+
+
+def test_build_transcript_includes_thinking_trace():
+    events = [
+        Event(
+            invocation_id="inv-test",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[
+                    types.Part(text="Plan the search.", thought=True),
+                    types.Part(text="Final answer."),
+                ],
+            ),
+        )
+    ]
+
+    transcript = _build_transcript(events)
+
+    assert len(transcript) == 1
+    assert transcript[0].role == "assistant"
+    assert transcript[0].text == "Final answer."
+    assert transcript[0].thinking_trace == "Plan the search."
+    assert transcript[0].tool_calls == []

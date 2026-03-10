@@ -63,6 +63,7 @@ class TranscriptMessage {
     required this.role,
     required this.text,
     required this.createdAt,
+    required this.thinkingTrace,
     required this.toolCalls,
   });
 
@@ -72,6 +73,7 @@ class TranscriptMessage {
       role: json['role'] as String? ?? 'assistant',
       text: json['text'] as String? ?? '',
       createdAt: (json['created_at'] as num?)?.toDouble() ?? 0,
+      thinkingTrace: json['thinking_trace'] as String? ?? '',
       toolCalls: (json['tool_calls'] as List<dynamic>? ?? const [])
           .map((item) => ToolCall.fromJson(item as Map<String, dynamic>))
           .toList(),
@@ -82,6 +84,7 @@ class TranscriptMessage {
   final String role;
   final String text;
   final double createdAt;
+  final String thinkingTrace;
   final List<ToolCall> toolCalls;
 
   bool get isUser => role == 'user';
@@ -91,6 +94,7 @@ class TranscriptMessage {
     String? role,
     String? text,
     double? createdAt,
+    String? thinkingTrace,
     List<ToolCall>? toolCalls,
   }) {
     return TranscriptMessage(
@@ -98,6 +102,7 @@ class TranscriptMessage {
       role: role ?? this.role,
       text: text ?? this.text,
       createdAt: createdAt ?? this.createdAt,
+      thinkingTrace: thinkingTrace ?? this.thinkingTrace,
       toolCalls: toolCalls ?? this.toolCalls,
     );
   }
