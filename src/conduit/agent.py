@@ -51,8 +51,12 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
 
 
 def _build_before_model_callback():
-    async def before_model(context: Context, llm_request: LlmRequest):
-        instructions = build_context_instructions(context.state)
+    async def before_model(
+        callback_context: Context,
+        llm_request: LlmRequest,
+        **_: object,
+    ):
+        instructions = build_context_instructions(callback_context.state)
         if instructions:
             llm_request.append_instructions(instructions)
         return None

@@ -1,7 +1,12 @@
+import asyncio
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 from google.adk.events.event import Event
+from google.adk.models.llm_request import LlmRequest
 from google.genai import types
 
+from conduit.agent import build_root_agent
 from conduit.config import Settings
 from conduit.main import _build_transcript
 from conduit.main import create_app
@@ -230,3 +235,31 @@ def test_build_transcript_includes_thinking_trace():
     assert transcript[0].text == "Final answer."
     assert transcript[0].thinking_trace == "Plan the search."
     assert transcript[0].tool_calls == []
+
+
+def test_before_model_callback_accepts_keyword_callback_context():
+    agent = build_root_agent(
+        Settings(_env_file=None),
+        model_name="claude-sonnet-4-6",
+    )
+    request = LlmRequest()
+
+    asyncio.run(
+        agent.before_model_callback(
+            callback_context=SimpleNamespace(
+                state={
+                    CURRENT_TIME_STATE_KEY: "2026-03-10 21:57:00 CET (UTC+01:00)",
+                    LOCATION_STATE_KEY: "Zurich, Switzerland",
+                    PERSONAL_INSTRUCTIONS_STATE_KEY: "Keep answers brief.",
+                }
+            ),
+            llm_request=request,
+        )
+    )
+
+    system_instruction = request.config.system_instruction
+    assert isinstance(system_instruction, str)
+    text = system_instruction
+    assert "Current local time for the user" in text
+    assert "Zurich, Switzerland" in text
+    assert "Keep answers brief." in text
