@@ -195,10 +195,11 @@ class _SessionListScreenState extends State<SessionListScreen> {
         ),
       ),
     );
-    if (updatedServerUrl == null) {
+    if (updatedServerUrl != null && updatedServerUrl != widget.serverUrl) {
+      widget.onServerUrlChanged(updatedServerUrl);
       return;
     }
-    widget.onServerUrlChanged(updatedServerUrl);
+    await _refresh();
   }
 
   Future<void> _createSession() async {
@@ -385,6 +386,7 @@ class _ChatScreenState extends State<ChatScreen> {
   _PendingApprovalRequest? _pendingApproval;
   bool _submittingApproval = false;
   bool _disposed = false;
+  String? _activeModelLabel;
 
   bool get _sending => _pendingTurns.isNotEmpty;
 
@@ -392,6 +394,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _loadMessages();
+    _loadActiveModel();
     _connectChat();
   }
 
@@ -429,6 +432,27 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _error = '$error';
         _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadActiveModel() async {
+    try {
+      final health = await widget.client.health();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeModelLabel = health.modelLabel.isNotEmpty
+            ? health.modelLabel
+            : health.model;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeModelLabel = null;
       });
     }
   }
@@ -1116,6 +1140,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           maxLines: 5,
                           textInputAction: TextInputAction.newline,
                           decoration: InputDecoration(
+                            labelText: _activeModelLabel ?? 'Active model',
+                            floatingLabelBehavior: FloatingLabelBehavior.always,
                             hintText: 'Ask Conduit something concrete.',
                             filled: true,
                             fillColor: const Color(0xFFFFFBF5),
@@ -1192,6 +1218,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 
   bool _saving = false;
+  bool _updatingModel = false;
   HealthStatus? _health;
   ModelSettings? _modelSettings;
   String? _selectedModelKey;
@@ -1256,6 +1283,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _modelSettings = null;
         _selectedModelKey = null;
         _saving = false;
+        _updatingModel = false;
       });
     }
   }
@@ -1276,32 +1304,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final client = ConduitApiClient(baseUrl: candidate);
-      var health = await client.health();
-      var modelSettings = await client.getModelSettings();
-      final selectedModelKey = _selectedModelKey ?? modelSettings.activeKey;
-      if (selectedModelKey != modelSettings.activeKey) {
-        modelSettings = await client.updateModel(selectedModelKey);
-        health = await client.health();
-      }
-
+      final results = await Future.wait<Object>([
+        client.health(),
+        client.getModelSettings(),
+      ]);
       await widget.settingsStore.saveServerUrl(candidate);
       if (!mounted) {
         return;
       }
 
+      final health = results[0] as HealthStatus;
+      final modelSettings = results[1] as ModelSettings;
       setState(() {
         _health = health;
         _modelSettings = modelSettings;
         _selectedModelKey = modelSettings.activeKey;
         _saving = false;
       });
+
       Navigator.of(context).pop<String>(_controller.text.trim());
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Connected to ${health.appName} on ${modelSettings.activeLabel}.',
-          ),
-        ),
+        SnackBar(content: Text('Saved ${_controller.text.trim()}.')),
       );
     } catch (error) {
       if (!mounted) {
@@ -1310,6 +1333,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _error = '$error';
         _saving = false;
+      });
+    }
+  }
+
+  Future<void> _applyModelChange(String modelKey) async {
+    final candidate = _controller.text.trim();
+    final modelSettings = _modelSettings;
+    if (candidate.isEmpty || modelSettings == null) {
+      setState(() {
+        _error = 'Connect to a server before changing the model.';
+      });
+      return;
+    }
+    if (modelKey == modelSettings.activeKey) {
+      return;
+    }
+
+    final previousModelKey = modelSettings.activeKey;
+    setState(() {
+      _updatingModel = true;
+      _error = null;
+      _selectedModelKey = modelKey;
+    });
+
+    try {
+      final client = ConduitApiClient(baseUrl: candidate);
+      final updatedModelSettings = await client.updateModel(modelKey);
+      final health = await client.health();
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _health = health;
+        _modelSettings = updatedModelSettings;
+        _selectedModelKey = updatedModelSettings.activeKey;
+        _updatingModel = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Switched to ${updatedModelSettings.activeLabel}.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = '$error';
+        _selectedModelKey = previousModelKey;
+        _updatingModel = false;
       });
     }
   }
@@ -1364,7 +1438,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _saving ? null : _testConnection,
+                          onPressed: (_saving || _updatingModel)
+                              ? null
+                              : _testConnection,
                           icon: const Icon(Icons.network_ping),
                           label: const Text('Test'),
                         ),
@@ -1372,7 +1448,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: _saving ? null : _save,
+                          onPressed: (_saving || _updatingModel) ? null : _save,
                           icon: _saving
                               ? const SizedBox(
                                   width: 16,
@@ -1407,8 +1483,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: const Color(0xFF5B6672),
                       ),
                     ),
+                    if (_updatingModel) ...[
+                      const SizedBox(height: 12),
+                      const LinearProgressIndicator(minHeight: 3),
+                    ],
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
+                      key: ValueKey(
+                        '${_modelSettings!.activeKey}:${_selectedModelKey ?? ''}',
+                      ),
                       initialValue: _selectedModelKey,
                       decoration: InputDecoration(
                         filled: true,
@@ -1433,15 +1516,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           )
                           .toList(),
-                      onChanged: _saving
+                      onChanged: (_saving || _updatingModel)
                           ? null
                           : (value) {
                               if (value == null) {
                                 return;
                               }
-                              setState(() {
-                                _selectedModelKey = value;
-                              });
+                              unawaited(_applyModelChange(value));
                             },
                     ),
                   ],
