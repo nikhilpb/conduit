@@ -24,6 +24,8 @@ from conduit.model_registry import ModelRegistry
 from conduit.model_registry import persist_model_registry
 from conduit.model_registry import load_model_registry
 from conduit.sessions import SQLiteSessionService
+from conduit.tool_permissions import effective_tool_permission
+from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 
 
@@ -40,6 +42,7 @@ class RuntimeTurnUpdate:
     tool_call_id: str | None = None
     tool_name: str | None = None
     tool_args: dict[str, Any] = field(default_factory=dict)
+    tool_response: dict[str, Any] | None = None
     tool_status: str = "pending"
     tool_error: str | None = None
     text: str = ""
@@ -138,7 +141,10 @@ class ConduitRuntime:
     def tool_permission_mode(self, tool_name: str) -> str:
         """Return the configured permission mode for a tool."""
 
-        return self.settings.tool_permissions.get(tool_name, "allow")
+        return effective_tool_permission(
+            tool_name,
+            permissions=self.settings.tool_permissions,
+        )
 
     async def iter_events(
         self,
@@ -147,10 +153,12 @@ class ConduitRuntime:
         new_message: types.Content,
         invocation_id: str | None = None,
         state_delta: dict[str, Any] | None = None,
+        runner: Runner | None = None,
     ) -> AsyncIterator[Event]:
         """Yield raw ADK events for a session invocation."""
 
-        async for event in self.runner.run_async(
+        active_runner = runner or self.runner
+        async for event in active_runner.run_async(
             user_id=self.settings.internal_user_id,
             session_id=session.id,
             invocation_id=invocation_id,
@@ -165,6 +173,7 @@ class ConduitRuntime:
         session: Session,
         message: str,
         state_delta: dict[str, Any] | None = None,
+        runner: Runner | None = None,
     ) -> AsyncIterator[RuntimeTurnUpdate]:
         """Yield structured updates for a single turn."""
 
@@ -177,6 +186,7 @@ class ConduitRuntime:
             session=session,
             new_message=types.UserContent(parts=[types.Part(text=message)]),
             state_delta=state_delta,
+            runner=runner,
         ):
             if event.author == "user":
                 continue
@@ -205,11 +215,16 @@ class ConduitRuntime:
                 if _is_internal_function_call(function_response.name):
                     continue
                 tool_call_id = getattr(function_response, "id", None)
+                response = public_tool_response(
+                    function_response.name,
+                    function_response.response,
+                )
                 status, error = tool_response_status(function_response.response)
                 yield RuntimeTurnUpdate(
                     kind="tool_result",
                     tool_call_id=tool_call_id,
                     tool_name=function_response.name,
+                    tool_response=response,
                     tool_status=status,
                     tool_error=error,
                 )
@@ -246,6 +261,7 @@ class ConduitRuntime:
             session=session,
             message=message,
             state_delta=state_delta,
+            runner=self.http_runner,
         ):
             if update.kind == "tool_call":
                 tool_call = {
@@ -254,6 +270,7 @@ class ConduitRuntime:
                     "args": dict(update.tool_args),
                     "status": "pending",
                     "error": None,
+                    "response": None,
                 }
                 if update.tool_call_id:
                     tool_call_index_by_id[update.tool_call_id] = len(tool_calls)
@@ -266,6 +283,7 @@ class ConduitRuntime:
                     "args": {},
                     "status": update.tool_status,
                     "error": update.tool_error,
+                    "response": update.tool_response,
                 }
                 if update.tool_call_id and update.tool_call_id in tool_call_index_by_id:
                     tool_calls[tool_call_index_by_id[update.tool_call_id]] = {
@@ -274,6 +292,7 @@ class ConduitRuntime:
                         or tool_calls[tool_call_index_by_id[update.tool_call_id]]["name"],
                         "status": update.tool_status,
                         "error": update.tool_error,
+                        "response": update.tool_response,
                     }
                 else:
                     if update.tool_call_id:
@@ -299,6 +318,19 @@ class ConduitRuntime:
         )
         self.runner = Runner(
             app=self.app,
+            session_service=self.session_service,
+        )
+        self.http_app = App(
+            name=self.settings.app_name,
+            root_agent=build_root_agent(
+                self.settings,
+                model_name=registry.active.model,
+                enable_bash=False,
+            ),
+            resumability_config=ResumabilityConfig(is_resumable=True),
+        )
+        self.http_runner = Runner(
+            app=self.http_app,
             session_service=self.session_service,
         )
 

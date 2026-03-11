@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     fetch_timeout_seconds: float = 15.0
     fetch_max_chars: int = 12_000
     fetch_user_agent: str = "Conduit/0.1"
+    bash_timeout_seconds: float = 30.0
+    bash_max_output_chars: int = 12_000
     polymarket_timeout_seconds: float = 15.0
     google_api_key: str | None = Field(
         default=None,

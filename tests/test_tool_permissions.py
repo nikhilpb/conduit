@@ -1,3 +1,4 @@
+from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_permissions import load_tool_permissions
 from conduit.tool_permissions import permission_summary
 
@@ -16,6 +17,7 @@ tools:
 
     permissions = load_tool_permissions(str(config_path))
 
+    assert permissions["bash"] == "ask"
     assert permissions["web_search"] == "allow"
     assert permissions["web_fetch"] == "ask"
     assert permissions["polymarket_search_markets"] == "allow"
@@ -30,3 +32,8 @@ def test_permission_summary_includes_arguments():
         permission_summary("web_fetch", {"url": "https://example.com"})
         == "Run web_fetch(url='https://example.com')."
     )
+
+
+def test_bash_permission_cannot_be_configured_to_allow():
+    assert effective_tool_permission("bash", configured_mode="allow") == "ask"
+    assert effective_tool_permission("bash", configured_mode="deny") == "deny"

@@ -267,6 +267,48 @@ def test_build_transcript_includes_failed_tool_result():
     assert transcript[0].tool_calls[0].error == "HTTP 403 Forbidden"
 
 
+def test_build_transcript_includes_bash_tool_response():
+    events = [
+        Event(
+            invocation_id="inv-test",
+            author="bash",
+            content=types.Content(
+                role="tool",
+                parts=[
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            id="tc_1",
+                            name="bash",
+                            response={
+                                "ok": True,
+                                "stdout": "hello",
+                                "stderr": "",
+                                "exit_code": 0,
+                                "timed_out": False,
+                                "duration_seconds": 0.01,
+                            },
+                        )
+                    )
+                ],
+            ),
+        )
+    ]
+
+    transcript = _build_transcript(events)
+
+    assert len(transcript) == 1
+    assert transcript[0].tool_calls[0].name == "bash"
+    assert transcript[0].tool_calls[0].status == "completed"
+    assert transcript[0].tool_calls[0].response == {
+        "ok": True,
+        "duration_seconds": 0.01,
+        "exit_code": 0,
+        "stdout": "hello",
+        "stderr": "",
+        "timed_out": False,
+    }
+
+
 def test_before_model_callback_accepts_keyword_callback_context():
     agent = build_root_agent(
         Settings(_env_file=None),

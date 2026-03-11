@@ -9,19 +9,54 @@ from google.adk.tools.tool_context import ToolContext
 from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
 from conduit.config import Settings
 from conduit.model_registry import infer_provider
+from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_permissions import permission_summary
+from conduit.tools.bash import build_bash_tool
 from conduit.tools.polymarket import build_polymarket_tools
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
 from conduit.user_context import build_context_instructions
 
 
-def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
+def build_root_agent(
+    settings: Settings,
+    *,
+    model_name: str,
+    enable_bash: bool = True,
+) -> Agent:
     """Build the single-agent runtime used by the API and ADK Web."""
 
     web_search = build_web_search_tool(settings)
     web_fetch = build_web_fetch_tool(settings)
     polymarket_tools = build_polymarket_tools(settings)
+    tools = [
+        web_search,
+        web_fetch,
+        *polymarket_tools,
+    ]
+    description_parts = [
+        "A personal assistant that can search the web, fetch webpages, ",
+    ]
+    instruction_parts = [
+        "You are Conduit, a research assistant. ",
+        "Use web_search when you need to discover fresh information. ",
+        "Use web_fetch when you need to inspect a specific page or URL in detail. ",
+    ]
+    if enable_bash:
+        bash = build_bash_tool(settings)
+        tools.insert(2, bash)
+        description_parts.append("run Bash commands on the host, ")
+        instruction_parts.extend(
+            [
+                "Use bash when you need to inspect or operate on the local host computer. ",
+                "The bash tool can execute arbitrary host commands and every bash call ",
+                "requires explicit user confirmation before it runs. ",
+                "When bash returns, read its stdout, stderr, exit_code, and timed_out ",
+                "fields literally. If stdout or stderr contains text, quote or summarize ",
+                "that text directly and do not claim the output was missing. Only say the ",
+                "command produced no visible output when both stdout and stderr are empty. ",
+            ]
+        )
     provider = infer_provider(model_name)
     model = model_name
     if provider == "anthropic":
@@ -36,32 +71,30 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
         name="conduit",
         model=model,
         description=(
-            "A personal assistant that can search the web, fetch webpages, "
-            "and inspect Polymarket prediction markets."
+            "".join(description_parts)
+            + "and inspect Polymarket prediction markets."
         ),
         instruction=(
-            "You are Conduit, a research assistant. "
-            "Use web_search when you need to discover fresh information. "
-            "Use web_fetch when you need to inspect a specific page or URL in detail. "
-            "If a tool reports an error, treat it as a failed attempt and keep working when useful. "
-            "Use polymarket_search_markets or polymarket_list_markets to find "
-            "prediction markets on Polymarket. "
-            "Use polymarket_get_market for current prices, liquidity, and trade volume. "
-            "Use polymarket_get_price_history for historical price series by outcome. "
-            "When the user asks for future-looking probabilities or who is likely "
-            "to win or happen, such as an election outcome or a geopolitical event, "
-            "check Polymarket first when it is relevant. "
-            "The Polymarket tools are read-only and only expose public market data. "
-            "Prefer citing concrete facts from fetched pages when possible. "
-            "If you are uncertain, say so directly."
+            "".join(
+                instruction_parts
+                + [
+                    "If a tool reports an error, treat it as a failed attempt and keep working when useful. ",
+                    "Use polymarket_search_markets or polymarket_list_markets to find ",
+                    "prediction markets on Polymarket. ",
+                    "Use polymarket_get_market for current prices, liquidity, and trade volume. ",
+                    "Use polymarket_get_price_history for historical price series by outcome. ",
+                    "When the user asks for future-looking probabilities or who is likely ",
+                    "to win or happen, such as an election outcome or a geopolitical event, ",
+                    "check Polymarket first when it is relevant. ",
+                    "The Polymarket tools are read-only and only expose public market data. ",
+                    "Prefer citing concrete facts from fetched pages when possible. ",
+                    "If you are uncertain, say so directly.",
+                ]
+            )
         ),
         before_model_callback=_build_before_model_callback(),
         before_tool_callback=_build_before_tool_callback(settings),
-        tools=[
-            web_search,
-            web_fetch,
-            *polymarket_tools,
-        ],
+        tools=tools,
     )
 
 
@@ -85,7 +118,10 @@ def _build_before_tool_callback(settings: Settings):
         args: dict,
         tool_context: ToolContext,
     ) -> dict | None:
-        mode = settings.tool_permissions.get(tool.name, "allow")
+        mode = effective_tool_permission(
+            tool.name,
+            permissions=settings.tool_permissions,
+        )
         if mode == "allow":
             return None
 

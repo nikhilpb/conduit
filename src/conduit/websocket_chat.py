@@ -18,6 +18,7 @@ from google.genai import types
 from conduit.runtime import ConduitRuntime
 from conduit.sessions.sqlite_service import ClientTurnRecord
 from conduit.tool_permissions import permission_summary
+from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 from conduit.user_context import build_state_delta
 from conduit.user_context import coerce_turn_context
@@ -381,6 +382,10 @@ class WebSocketChatManager:
                     tool_call_id = getattr(function_response, "id", None) or (
                         function_response.name or f"tool_{len(turn.tool_calls)}"
                     )
+                    response = public_tool_response(
+                        function_response.name,
+                        function_response.response,
+                    )
                     status, error = tool_response_status(function_response.response)
                     _upsert_tool_call(
                         turn.tool_calls,
@@ -388,6 +393,7 @@ class WebSocketChatManager:
                         tool_name=function_response.name,
                         status=status,
                         error=error,
+                        response=response,
                     )
                     await turn.publish(
                         {
@@ -397,6 +403,7 @@ class WebSocketChatManager:
                             "tool": function_response.name,
                             "status": status,
                             "error": error,
+                            "response": response,
                         }
                     )
 
@@ -548,6 +555,7 @@ def _extract_approval_required_event(
             "approval_id": function_call.id or "",
             "tool_call_id": original_function_call.get("id") or "",
             "tool": tool_name,
+            "args": tool_args,
             "summary": payload.get("summary")
             or tool_confirmation.get("hint")
             or permission_summary(tool_name, tool_args),
@@ -564,6 +572,7 @@ def _upsert_tool_call(
     tool_args: dict[str, Any] | None = None,
     status: str,
     error: str | None,
+    response: dict[str, Any] | None = None,
 ) -> None:
     for tool_call in tool_calls:
         if tool_call.get("tool_call_id") != tool_call_id:
@@ -574,6 +583,8 @@ def _upsert_tool_call(
             tool_call["args"] = dict(tool_args)
         tool_call["status"] = status
         tool_call["error"] = error
+        if response is not None:
+            tool_call["response"] = dict(response)
         return
 
     tool_calls.append(
@@ -583,6 +594,7 @@ def _upsert_tool_call(
             "args": dict(tool_args or {}),
             "status": status,
             "error": error,
+            "response": dict(response) if response is not None else None,
         }
     )
 
