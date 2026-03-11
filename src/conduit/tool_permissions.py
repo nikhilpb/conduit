@@ -13,6 +13,10 @@ ToolPermissionMode = Literal["allow", "ask", "deny"]
 DEFAULT_TOOL_PERMISSIONS: dict[str, ToolPermissionMode] = {
     "web_search": "allow",
     "web_fetch": "allow",
+    "polymarket_search_markets": "allow",
+    "polymarket_list_markets": "allow",
+    "polymarket_get_market": "allow",
+    "polymarket_get_price_history": "allow",
 }
 
 
