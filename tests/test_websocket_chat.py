@@ -23,6 +23,7 @@ class FakeRuntime:
         thought_trace: str = "",
         delay_seconds: float = 0.0,
         require_approval: bool = False,
+        tool_error: str | None = None,
     ):
         self.settings = Settings(
             _env_file=None,
@@ -33,6 +34,7 @@ class FakeRuntime:
         self.thought_trace = thought_trace
         self.delay_seconds = delay_seconds
         self.require_approval = require_approval
+        self.tool_error = tool_error
         self.iter_event_calls = 0
         self.received_state_deltas: list[dict[str, object] | None] = []
 
@@ -99,6 +101,12 @@ class FakeRuntime:
         if self.require_approval:
             yield _approval_required_event()
             return
+        if self.tool_error:
+            yield _tool_result_event(
+                tool_call_id="tc_1",
+                tool_name="web_search",
+                response={"ok": False, "error": self.tool_error},
+            )
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
         if self.thought_trace:
@@ -169,6 +177,35 @@ def test_websocket_turn_passes_context_into_runtime_state(tmp_path):
             "user:conduit_personal_instructions": "Prefer concise answers.",
         }
     ]
+
+
+def test_websocket_turn_streams_failed_tool_result_and_done(tmp_path):
+    app, runtime = _create_websocket_test_app(
+        tmp_path=tmp_path,
+        reply="The fetch was blocked, so I would try another source next.",
+        tool_error="HTTP 403 Forbidden",
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/chat") as websocket:
+        websocket.send_json(
+            {
+                "type": "text",
+                "message_id": "m1",
+                "content": "look up blocked page",
+            }
+        )
+        events = _collect_events_until_terminal(websocket)
+
+    tool_result_events = [
+        event for event in events if event["type"] == "tool_result"
+    ]
+    assert len(tool_result_events) == 1
+    assert tool_result_events[0]["tool_call_id"] == "tc_1"
+    assert tool_result_events[0]["status"] == "failed"
+    assert tool_result_events[0]["error"] == "HTTP 403 Forbidden"
+    assert events[-1]["type"] == "done"
+    assert runtime.iter_event_calls == 1
 
 
 def test_websocket_replays_completed_turn_for_duplicate_message_id(tmp_path):
@@ -304,6 +341,7 @@ def _create_websocket_test_app(
     thought_trace: str = "",
     delay_seconds: float = 0.0,
     require_approval: bool = False,
+    tool_error: str | None = None,
 ):
     app = create_app(
         Settings(
@@ -317,6 +355,7 @@ def _create_websocket_test_app(
         thought_trace=thought_trace,
         delay_seconds=delay_seconds,
         require_approval=require_approval,
+        tool_error=tool_error,
     )
     app.state.runtime = runtime
     app.state.chat_manager = WebSocketChatManager(runtime)
@@ -359,6 +398,27 @@ def _tool_call_event(*, tool_call_id: str, tool_name: str, args: dict[str, objec
         content=types.Content(
             role="model",
             parts=[types.Part(function_call=function_call)],
+        ),
+    )
+
+
+def _tool_result_event(
+    *,
+    tool_call_id: str,
+    tool_name: str,
+    response: dict[str, object],
+) -> Event:
+    function_response = types.FunctionResponse(
+        id=tool_call_id,
+        name=tool_name,
+        response=response,
+    )
+    return Event(
+        invocation_id="inv-test",
+        author=tool_name,
+        content=types.Content(
+            role="tool",
+            parts=[types.Part(function_response=function_response)],
         ),
     )
 

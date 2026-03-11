@@ -26,15 +26,32 @@ def build_web_fetch_tool(settings: Settings):
 
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("url must be a valid http or https URL")
+            return _error_result(
+                url=url,
+                message="url must be a valid http or https URL",
+            )
 
         async with httpx.AsyncClient(
             follow_redirects=True,
             headers={"User-Agent": settings.fetch_user_agent},
             timeout=settings.fetch_timeout_seconds,
         ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                reason = (exc.response.reason_phrase or "request failed").strip()
+                return _error_result(
+                    url=url,
+                    resolved_url=str(exc.response.url),
+                    status_code=exc.response.status_code,
+                    message=f"HTTP {exc.response.status_code} {reason}",
+                )
+            except httpx.HTTPError as exc:
+                return _error_result(
+                    url=url,
+                    message=f"{type(exc).__name__}: {exc}",
+                )
 
         content_type = response.headers.get("content-type", "").lower()
         resolved_url = str(response.url)
@@ -45,6 +62,7 @@ def build_web_fetch_tool(settings: Settings):
                 max_chars=settings.fetch_max_chars,
             )
             return {
+                "ok": True,
                 "url": resolved_url,
                 "status_code": response.status_code,
                 "content_type": content_type,
@@ -56,6 +74,7 @@ def build_web_fetch_tool(settings: Settings):
         if content_type.startswith("text/") or "json" in content_type:
             content = response.text[: settings.fetch_max_chars]
             return {
+                "ok": True,
                 "url": resolved_url,
                 "status_code": response.status_code,
                 "content_type": content_type,
@@ -65,6 +84,7 @@ def build_web_fetch_tool(settings: Settings):
             }
 
         return {
+            "ok": True,
             "url": resolved_url,
             "status_code": response.status_code,
             "content_type": content_type,
@@ -75,6 +95,25 @@ def build_web_fetch_tool(settings: Settings):
         }
 
     return web_fetch
+
+
+def _error_result(
+    *,
+    url: str,
+    message: str,
+    resolved_url: str | None = None,
+    status_code: int | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "url": resolved_url or url,
+        "status_code": status_code,
+        "content_type": None,
+        "title": None,
+        "content": "",
+        "truncated": False,
+        "error": message,
+    }
 
 
 def _extract_html_text(html: str, *, max_chars: int) -> tuple[str | None, str]:
@@ -89,4 +128,3 @@ def _extract_html_text(html: str, *, max_chars: int) -> tuple[str | None, str]:
     lines = [line.strip() for line in soup.get_text("\n").splitlines()]
     cleaned_text = "\n".join(line for line in lines if line)
     return title, cleaned_text[:max_chars]
-

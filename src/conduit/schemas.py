@@ -33,8 +33,11 @@ class CreateSessionResponse(BaseModel):
 
 
 class ToolCall(BaseModel):
+    tool_call_id: str | None = None
     name: str
     args: dict[str, Any] = Field(default_factory=dict)
+    status: str = "pending"
+    error: str | None = None
 
 
 class TranscriptMessage(BaseModel):

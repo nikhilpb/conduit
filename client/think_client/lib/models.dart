@@ -48,19 +48,39 @@ class SessionSummary {
 }
 
 class ToolCall {
-  const ToolCall({required this.name, required this.args});
+  const ToolCall({
+    this.toolCallId,
+    required this.name,
+    required this.args,
+    this.status = 'pending',
+    this.error,
+  });
 
   factory ToolCall.fromJson(Map<String, dynamic> json) {
     return ToolCall(
+      toolCallId: json['tool_call_id'] as String?,
       name: json['name'] as String? ?? 'tool',
       args: Map<String, dynamic>.from(json['args'] as Map? ?? const {}),
+      status: json['status'] as String? ?? 'pending',
+      error: json['error'] as String?,
     );
   }
 
+  final String? toolCallId;
   final String name;
   final Map<String, dynamic> args;
+  final String status;
+  final String? error;
 
-  Map<String, dynamic> toJson() => {'name': name, 'args': args};
+  bool get isFailed => status == 'failed';
+
+  Map<String, dynamic> toJson() => {
+    'tool_call_id': toolCallId,
+    'name': name,
+    'args': args,
+    'status': status,
+    'error': error,
+  };
 }
 
 class TranscriptMessage {
@@ -170,6 +190,8 @@ class ChatServerEvent {
     this.clientRequestId,
     this.summary,
     this.message,
+    this.status,
+    this.error,
   });
 
   factory ChatServerEvent.fromJson(Map<String, dynamic> json) {
@@ -188,6 +210,8 @@ class ChatServerEvent {
       clientRequestId: json['client_request_id'] as String?,
       summary: json['summary'] as String?,
       message: json['message'] as String?,
+      status: json['status'] as String?,
+      error: json['error'] as String?,
     );
   }
 
@@ -205,6 +229,8 @@ class ChatServerEvent {
   final String? clientRequestId;
   final String? summary;
   final String? message;
+  final String? status;
+  final String? error;
 
   bool get isTerminal => type == 'done' || type == 'error';
 }

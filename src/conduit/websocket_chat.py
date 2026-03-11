@@ -18,6 +18,7 @@ from google.genai import types
 from conduit.runtime import ConduitRuntime
 from conduit.sessions.sqlite_service import ClientTurnRecord
 from conduit.tool_permissions import permission_summary
+from conduit.tool_call_utils import tool_response_status
 from conduit.user_context import build_state_delta
 from conduit.user_context import coerce_turn_context
 
@@ -351,12 +352,14 @@ class WebSocketChatManager:
                         continue
 
                     turn.seen_tool_call_ids.add(tool_call_id)
-                    tool_call = {
-                        "tool_call_id": tool_call_id,
-                        "name": function_call.name or "",
-                        "args": dict(function_call.args or {}),
-                    }
-                    turn.tool_calls.append(tool_call)
+                    _upsert_tool_call(
+                        turn.tool_calls,
+                        tool_call_id=tool_call_id,
+                        tool_name=function_call.name,
+                        tool_args=dict(function_call.args or {}),
+                        status="pending",
+                        error=None,
+                    )
                     await turn.publish(
                         {
                             "type": "tool_call",
@@ -364,9 +367,36 @@ class WebSocketChatManager:
                             "tool_call_id": tool_call_id,
                             "tool": function_call.name,
                             "args": dict(function_call.args or {}),
+                            "status": "pending",
                             "permission": self.runtime.tool_permission_mode(
                                 function_call.name or ""
                             ),
+                        }
+                    )
+
+                for function_response in event.get_function_responses():
+                    if function_response.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME:
+                        continue
+
+                    tool_call_id = getattr(function_response, "id", None) or (
+                        function_response.name or f"tool_{len(turn.tool_calls)}"
+                    )
+                    status, error = tool_response_status(function_response.response)
+                    _upsert_tool_call(
+                        turn.tool_calls,
+                        tool_call_id=tool_call_id,
+                        tool_name=function_response.name,
+                        status=status,
+                        error=error,
+                    )
+                    await turn.publish(
+                        {
+                            "type": "tool_result",
+                            "turn_id": turn.turn_id,
+                            "tool_call_id": tool_call_id,
+                            "tool": function_response.name,
+                            "status": status,
+                            "error": error,
                         }
                     )
 
@@ -524,6 +554,37 @@ def _extract_approval_required_event(
         }
 
     return None
+
+
+def _upsert_tool_call(
+    tool_calls: list[dict[str, Any]],
+    *,
+    tool_call_id: str,
+    tool_name: str | None,
+    tool_args: dict[str, Any] | None = None,
+    status: str,
+    error: str | None,
+) -> None:
+    for tool_call in tool_calls:
+        if tool_call.get("tool_call_id") != tool_call_id:
+            continue
+        if tool_name:
+            tool_call["name"] = tool_name
+        if tool_args is not None:
+            tool_call["args"] = dict(tool_args)
+        tool_call["status"] = status
+        tool_call["error"] = error
+        return
+
+    tool_calls.append(
+        {
+            "tool_call_id": tool_call_id,
+            "name": tool_name or "",
+            "args": dict(tool_args or {}),
+            "status": status,
+            "error": error,
+        }
+    )
 
 
 def _build_approval_message(
