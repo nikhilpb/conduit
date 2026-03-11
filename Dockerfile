@@ -17,15 +17,10 @@ RUN set -eux; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
     url="https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/gws-${gws_arch}-unknown-linux-gnu.tar.gz"; \
-    python - "$url" /tmp/gws.tar.gz <<'PY'
-import sys
-import urllib.request
-
-url = sys.argv[1]
-destination = sys.argv[2]
-with urllib.request.urlopen(url) as response, open(destination, "wb") as sink:
-    sink.write(response.read())
-PY
+    python -c "import sys, urllib.request; \
+with urllib.request.urlopen(sys.argv[1]) as response, open(sys.argv[2], 'wb') as sink: \
+    sink.write(response.read())" \
+      "$url" /tmp/gws.tar.gz; \
     mkdir -p /tmp/gws-extract; \
     tar -xzf /tmp/gws.tar.gz -C /tmp/gws-extract --strip-components=1; \
     install -m 0755 /tmp/gws-extract/gws /usr/local/bin/gws; \
