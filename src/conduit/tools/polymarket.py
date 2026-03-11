@@ -33,7 +33,7 @@ def build_polymarket_tools(settings: Settings) -> list:
         Returns matching market IDs, slugs, outcome prices, and volume snapshots.
         """
 
-        cleaned_query = query.strip()
+        cleaned_query = _coerce_text(query)
         if not cleaned_query:
             raise ValueError("query must not be empty")
 
@@ -80,8 +80,9 @@ def build_polymarket_tools(settings: Settings) -> list:
             "limit": bounded_limit,
             "offset": max(0, offset),
         }
-        if tag:
-            params["tag_slug"] = tag.strip()
+        cleaned_tag = _coerce_text(tag)
+        if cleaned_tag:
+            params["tag_slug"] = cleaned_tag
 
         async with _build_http_client(settings) as client:
             markets = await _gamma_get(client, "/markets", params)
@@ -94,11 +95,17 @@ def build_polymarket_tools(settings: Settings) -> list:
     ) -> dict[str, Any]:
         """Get one market's current prices, volume, liquidity, and live midpoint data."""
 
-        if not market_id and not slug:
+        cleaned_market_id = _coerce_text(market_id)
+        cleaned_slug = _coerce_text(slug)
+        if not cleaned_market_id and not cleaned_slug:
             raise ValueError("provide either market_id or slug")
 
         async with _build_http_client(settings) as client:
-            market = await _resolve_market(client, market_id=market_id, slug=slug)
+            market = await _resolve_market(
+                client,
+                market_id=cleaned_market_id,
+                slug=cleaned_slug,
+            )
             outcomes = _parse_json_field(market.get("outcomes"))
             token_ids = _parse_json_field(market.get("clobTokenIds"))
             live_pricing: list[dict[str, Any]] = []
@@ -145,7 +152,7 @@ def build_polymarket_tools(settings: Settings) -> list:
     ) -> list[dict[str, Any]]:
         """Get historical Polymarket prices for each market outcome."""
 
-        cleaned_market_id = market_id.strip()
+        cleaned_market_id = _coerce_text(market_id)
         if not cleaned_market_id:
             raise ValueError("market_id must not be empty")
 
@@ -220,16 +227,18 @@ async def _resolve_market(
     market_id: str | None = None,
     slug: str | None = None,
 ) -> dict[str, Any]:
-    if market_id:
-        payload = await _gamma_get(client, f"/markets/{market_id.strip()}")
+    cleaned_market_id = _coerce_text(market_id)
+    if cleaned_market_id:
+        payload = await _gamma_get(client, f"/markets/{cleaned_market_id}")
         if not isinstance(payload, dict):
             raise ValueError(f"unexpected Polymarket market payload for id {market_id!r}")
         return payload
 
-    if not slug:
+    cleaned_slug = _coerce_text(slug)
+    if not cleaned_slug:
         raise ValueError("provide either market_id or slug")
 
-    payload = await _gamma_get(client, "/markets", {"slug": slug.strip()})
+    payload = await _gamma_get(client, "/markets", {"slug": cleaned_slug})
     if not isinstance(payload, list) or not payload:
         raise ValueError(f"no market found with slug: {slug}")
     if not isinstance(payload[0], dict):
@@ -336,6 +345,14 @@ def _event_slug(market: dict[str, Any]) -> str | None:
 
 def _volume_value(market: dict[str, Any]) -> float:
     return _coerce_float(market.get("volumeNum") or market.get("volume")) or 0.0
+
+
+def _coerce_text(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    return text or None
 
 
 def _coerce_float(value: Any) -> float | None:

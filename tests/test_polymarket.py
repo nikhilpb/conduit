@@ -132,7 +132,7 @@ async def test_polymarket_get_market_includes_live_pricing(monkeypatch):
     monkeypatch.setattr(polymarket_module, "_get_midpoint", fake_get_midpoint)
     monkeypatch.setattr(polymarket_module, "_get_spread", fake_get_spread)
 
-    result = await _tool_map()["polymarket_get_market"](market_id="123")
+    result = await _tool_map()["polymarket_get_market"](market_id=123)
 
     assert result == {
         "id": "123",
@@ -192,7 +192,7 @@ async def test_polymarket_get_price_history_returns_series(monkeypatch):
     monkeypatch.setattr(polymarket_module, "_get_price_history", fake_get_price_history)
 
     result = await _tool_map()["polymarket_get_price_history"](
-        market_id="123",
+        market_id=123,
         interval="1d",
     )
 
