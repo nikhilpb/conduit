@@ -54,6 +54,7 @@ class ToolCall {
     required this.args,
     this.status = 'pending',
     this.error,
+    this.response,
   });
 
   factory ToolCall.fromJson(Map<String, dynamic> json) {
@@ -63,6 +64,9 @@ class ToolCall {
       args: Map<String, dynamic>.from(json['args'] as Map? ?? const {}),
       status: json['status'] as String? ?? 'pending',
       error: json['error'] as String?,
+      response: json['response'] == null
+          ? null
+          : Map<String, dynamic>.from(json['response'] as Map),
     );
   }
 
@@ -71,6 +75,7 @@ class ToolCall {
   final Map<String, dynamic> args;
   final String status;
   final String? error;
+  final Map<String, dynamic>? response;
 
   bool get isFailed => status == 'failed';
 
@@ -80,6 +85,7 @@ class ToolCall {
     'args': args,
     'status': status,
     'error': error,
+    'response': response,
   };
 }
 
@@ -192,6 +198,7 @@ class ChatServerEvent {
     this.message,
     this.status,
     this.error,
+    this.response,
   });
 
   factory ChatServerEvent.fromJson(Map<String, dynamic> json) {
@@ -212,6 +219,9 @@ class ChatServerEvent {
       message: json['message'] as String?,
       status: json['status'] as String?,
       error: json['error'] as String?,
+      response: json['response'] == null
+          ? null
+          : Map<String, dynamic>.from(json['response'] as Map),
     );
   }
 
@@ -231,6 +241,7 @@ class ChatServerEvent {
   final String? message;
   final String? status;
   final String? error;
+  final Map<String, dynamic>? response;
 
   bool get isTerminal => type == 'done' || type == 'error';
 }

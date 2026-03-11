@@ -743,6 +743,7 @@ class _ChatScreenState extends State<ChatScreen> {
         args: event.args,
         status: event.status ?? 'pending',
         error: event.error,
+        response: event.response,
       ),
     );
 
@@ -777,6 +778,7 @@ class _ChatScreenState extends State<ChatScreen> {
         args: const {},
         status: event.status ?? 'completed',
         error: event.error,
+        response: event.response,
       ),
     );
 
@@ -975,6 +977,7 @@ class _ChatScreenState extends State<ChatScreen> {
       error: nextToolCall.status == 'completed'
           ? null
           : (nextToolCall.error ?? currentToolCall.error),
+      response: nextToolCall.response ?? currentToolCall.response,
     );
 
     final nextToolCalls = [...existingToolCalls];
@@ -2234,6 +2237,7 @@ class ToolChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isFailed = toolCall.isFailed;
+    final detail = _toolCallDetail(toolCall);
     final chipColor = isUser
         ? Colors.white.withValues(alpha: 0.16)
         : isFailed
@@ -2251,30 +2255,68 @@ class ToolChip extends StatelessWidget {
         : const Color(0xFF7B4B2A);
 
     return Tooltip(
-      message: toolCall.error ?? _toolCallLabel(toolCall),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: chipColor,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: borderColor),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isFailed ? Icons.error_outline : Icons.build_outlined,
-              size: 14,
-              color: isUser ? Colors.white70 : foregroundColor,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              _toolCallLabel(toolCall),
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: foregroundColor),
-            ),
-          ],
+      message: toolCall.error ?? detail ?? _toolCallLabel(toolCall),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: detail == null ? 8 : 10,
+          ),
+          decoration: BoxDecoration(
+            color: chipColor,
+            borderRadius: BorderRadius.circular(detail == null ? 999 : 18),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isFailed ? Icons.error_outline : Icons.build_outlined,
+                    size: 14,
+                    color: isUser ? Colors.white70 : foregroundColor,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _toolCallLabel(toolCall),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelMedium?.copyWith(color: foregroundColor),
+                    ),
+                  ),
+                ],
+              ),
+              if (detail != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isUser
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : const Color(0xFFFFFBF5),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isUser ? Colors.white12 : const Color(0xFFE6DDCF),
+                    ),
+                  ),
+                  child: SelectableText(
+                    detail,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: isUser ? Colors.white : const Color(0xFF5B6672),
+                      fontFamily: 'monospace',
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -2324,6 +2366,12 @@ class _PendingReplyIndicatorState extends State<PendingReplyIndicator>
 
 String _toolCallLabel(ToolCall toolCall) {
   switch (toolCall.name) {
+    case 'bash':
+      final command = _ellipsize(
+        (toolCall.args['command'] as String?)?.trim() ?? 'command',
+        30,
+      );
+      return 'bash($command)';
     case 'web_search':
       final query = _ellipsize(
         (toolCall.args['query'] as String?)?.trim() ?? 'query',
@@ -2336,6 +2384,67 @@ String _toolCallLabel(ToolCall toolCall) {
     default:
       return toolCall.name;
   }
+}
+
+String? _toolCallDetail(ToolCall toolCall) {
+  if (toolCall.name != 'bash') {
+    return null;
+  }
+
+  final response = toolCall.response;
+  if (response == null || response.isEmpty) {
+    return toolCall.error;
+  }
+
+  final sections = <String>[];
+  final meta = <String>[];
+
+  final exitCode = response['exit_code'];
+  if (exitCode != null) {
+    meta.add('exit $exitCode');
+  }
+  if (response['timed_out'] == true) {
+    meta.add('timed out');
+  }
+  final duration = response['duration_seconds'];
+  if (duration is num) {
+    meta.add('${duration.toStringAsFixed(3)}s');
+  }
+  final workingDirectory = (response['working_directory'] as String?)?.trim();
+  if (workingDirectory != null && workingDirectory.isNotEmpty) {
+    meta.add('cwd ${_ellipsize(workingDirectory, 42)}');
+  }
+  if (meta.isNotEmpty) {
+    sections.add(meta.join(' • '));
+  }
+
+  final stdout = (response['stdout'] as String?) ?? '';
+  if (stdout.isNotEmpty) {
+    var stdoutSection = 'stdout\n$stdout';
+    if (response['stdout_truncated'] == true) {
+      stdoutSection = '$stdoutSection\n[truncated]';
+    }
+    sections.add(stdoutSection);
+  }
+
+  final stderr = (response['stderr'] as String?) ?? '';
+  if (stderr.isNotEmpty) {
+    var stderrSection = 'stderr\n$stderr';
+    if (response['stderr_truncated'] == true) {
+      stderrSection = '$stderrSection\n[truncated]';
+    }
+    sections.add(stderrSection);
+  }
+
+  final error = (response['error'] as String?)?.trim();
+  if (error != null && error.isNotEmpty && stderr.isEmpty) {
+    sections.add('error\n$error');
+  }
+
+  if (sections.isEmpty) {
+    return 'No stdout or stderr.';
+  }
+  return sections.join('\n\n');
 }
 
 String _shortenUrl(String url) {

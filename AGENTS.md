@@ -87,6 +87,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Assistant markdown is rendered, not shown raw.
 - Tool calls get explicit UI treatment; approval requests are surfaced inline.
 - Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
+- `bash` tool results now preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, and the Flutter client renders those details inline for completed bash calls.
 - Chat composer shows the currently active model label.
 - Current server URL comes from `--dart-define=CONDUIT_SERVER_URL=...` on first launch, but user settings can override later.
 

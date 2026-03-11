@@ -24,6 +24,8 @@ class FakeRuntime:
         delay_seconds: float = 0.0,
         require_approval: bool = False,
         tool_error: str | None = None,
+        tool_name: str = "web_search",
+        tool_response: dict[str, object] | None = None,
     ):
         self.settings = Settings(
             _env_file=None,
@@ -35,6 +37,8 @@ class FakeRuntime:
         self.delay_seconds = delay_seconds
         self.require_approval = require_approval
         self.tool_error = tool_error
+        self.tool_name = tool_name
+        self.tool_response = tool_response
         self.iter_event_calls = 0
         self.received_state_deltas: list[dict[str, object] | None] = []
 
@@ -85,13 +89,19 @@ class FakeRuntime:
             confirmed = bool(
                 new_message.parts[0].function_response.response.get("confirmed")
             )
+            if confirmed and self.require_approval:
+                yield _tool_result_event(
+                    tool_call_id="tc_1",
+                    tool_name="web_fetch",
+                    response={"ok": True},
+                )
             yield _text_event("Approved result." if confirmed else "Denied result.")
             return
 
         message = new_message.parts[0].text or ""
         yield _tool_call_event(
             tool_call_id="tc_1",
-            tool_name="web_fetch" if self.require_approval else "web_search",
+            tool_name="web_fetch" if self.require_approval else self.tool_name,
             args={
                 "url": "https://example.com"
                 if self.require_approval
@@ -104,8 +114,14 @@ class FakeRuntime:
         if self.tool_error:
             yield _tool_result_event(
                 tool_call_id="tc_1",
-                tool_name="web_search",
+                tool_name=self.tool_name,
                 response={"ok": False, "error": self.tool_error},
+            )
+        elif self.tool_response is not None:
+            yield _tool_result_event(
+                tool_call_id="tc_1",
+                tool_name=self.tool_name,
+                response=self.tool_response,
             )
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
@@ -204,6 +220,43 @@ def test_websocket_turn_streams_failed_tool_result_and_done(tmp_path):
     assert tool_result_events[0]["tool_call_id"] == "tc_1"
     assert tool_result_events[0]["status"] == "failed"
     assert tool_result_events[0]["error"] == "HTTP 403 Forbidden"
+    assert events[-1]["type"] == "done"
+    assert runtime.iter_event_calls == 1
+
+
+def test_websocket_turn_streams_bash_tool_result_response(tmp_path):
+    app, runtime = _create_websocket_test_app(
+        tmp_path=tmp_path,
+        reply="Bash result was used.",
+        tool_name="bash",
+        tool_response={
+            "ok": True,
+            "stdout": "hello",
+            "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "duration_seconds": 0.01,
+        },
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/chat") as websocket:
+        websocket.send_json(
+            {
+                "type": "text",
+                "message_id": "m1",
+                "content": "run hello",
+            }
+        )
+        events = _collect_events_until_terminal(websocket)
+
+    tool_result_events = [
+        event for event in events if event["type"] == "tool_result"
+    ]
+    assert len(tool_result_events) == 1
+    assert tool_result_events[0]["tool"] == "bash"
+    assert tool_result_events[0]["response"]["stdout"] == "hello"
+    assert tool_result_events[0]["response"]["exit_code"] == 0
     assert events[-1]["type"] == "done"
     assert runtime.iter_event_calls == 1
 
@@ -327,6 +380,7 @@ def test_websocket_approval_required_and_resume(tmp_path):
     ]
     assert approval_event["tool"] == "web_fetch"
     assert approval_event["tool_call_id"] == "tc_1"
+    assert any(event["type"] == "tool_result" for event in resumed_events)
     assert "".join(
         event["content"] for event in resumed_events if event["type"] == "token"
     ) == "Approved result."
@@ -342,6 +396,8 @@ def _create_websocket_test_app(
     delay_seconds: float = 0.0,
     require_approval: bool = False,
     tool_error: str | None = None,
+    tool_name: str = "web_search",
+    tool_response: dict[str, object] | None = None,
 ):
     app = create_app(
         Settings(
@@ -356,6 +412,8 @@ def _create_websocket_test_app(
         delay_seconds=delay_seconds,
         require_approval=require_approval,
         tool_error=tool_error,
+        tool_name=tool_name,
+        tool_response=tool_response,
     )
     app.state.runtime = runtime
     app.state.chat_manager = WebSocketChatManager(runtime)

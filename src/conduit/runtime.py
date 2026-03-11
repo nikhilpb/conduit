@@ -25,6 +25,7 @@ from conduit.model_registry import persist_model_registry
 from conduit.model_registry import load_model_registry
 from conduit.sessions import SQLiteSessionService
 from conduit.tool_permissions import effective_tool_permission
+from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 
 
@@ -41,6 +42,7 @@ class RuntimeTurnUpdate:
     tool_call_id: str | None = None
     tool_name: str | None = None
     tool_args: dict[str, Any] = field(default_factory=dict)
+    tool_response: dict[str, Any] | None = None
     tool_status: str = "pending"
     tool_error: str | None = None
     text: str = ""
@@ -209,11 +211,16 @@ class ConduitRuntime:
                 if _is_internal_function_call(function_response.name):
                     continue
                 tool_call_id = getattr(function_response, "id", None)
+                response = public_tool_response(
+                    function_response.name,
+                    function_response.response,
+                )
                 status, error = tool_response_status(function_response.response)
                 yield RuntimeTurnUpdate(
                     kind="tool_result",
                     tool_call_id=tool_call_id,
                     tool_name=function_response.name,
+                    tool_response=response,
                     tool_status=status,
                     tool_error=error,
                 )
@@ -258,6 +265,7 @@ class ConduitRuntime:
                     "args": dict(update.tool_args),
                     "status": "pending",
                     "error": None,
+                    "response": None,
                 }
                 if update.tool_call_id:
                     tool_call_index_by_id[update.tool_call_id] = len(tool_calls)
@@ -270,6 +278,7 @@ class ConduitRuntime:
                     "args": {},
                     "status": update.tool_status,
                     "error": update.tool_error,
+                    "response": update.tool_response,
                 }
                 if update.tool_call_id and update.tool_call_id in tool_call_index_by_id:
                     tool_calls[tool_call_index_by_id[update.tool_call_id]] = {
@@ -278,6 +287,7 @@ class ConduitRuntime:
                         or tool_calls[tool_call_index_by_id[update.tool_call_id]]["name"],
                         "status": update.tool_status,
                         "error": update.tool_error,
+                        "response": update.tool_response,
                     }
                 else:
                     if update.tool_call_id:

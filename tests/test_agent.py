@@ -18,5 +18,6 @@ def test_build_root_agent_includes_registered_tools():
     assert "polymarket_get_market" in tool_names
     assert "polymarket_get_price_history" in tool_names
     assert "every bash call requires explicit user confirmation" in agent.instruction
+    assert "do not claim the output was missing" in agent.instruction
     assert "future-looking probabilities" in agent.instruction
     assert "check Polymarket first when it is relevant" in agent.instruction
