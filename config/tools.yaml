@@ -1,4 +1,6 @@
 tools:
+  bash:
+    mode: ask
   web_search:
     mode: allow
   web_fetch:

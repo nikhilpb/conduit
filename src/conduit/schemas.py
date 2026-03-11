@@ -38,6 +38,7 @@ class ToolCall(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     status: str = "pending"
     error: str | None = None
+    response: dict[str, Any] | None = None
 
 
 class TranscriptMessage(BaseModel):

@@ -18,6 +18,7 @@ Android (Flutter)  ──WebSocket──▶  FastAPI :18423  ──▶  Google A
 - **Client:** Flutter Android app in `client/think_client/`.
 - **Deployment:** Docker Compose, Tailscale-only access on port `18423`.
 - **Models:** Claude Opus 4.6, Claude Sonnet 4.6, Gemini 3 Flash, Gemini 3.1 Pro — switchable at runtime via `config/models.yaml`.
+- **Built-in tools:** `web_search`, `web_fetch`, `bash` (host command execution with mandatory approval), and public Polymarket market lookup/price-history tools.
 
 See [DESIGN.md](DESIGN.md) for the full design document.
 
@@ -68,6 +69,8 @@ Docker Compose mounts two host directories into the container:
 | `./config`| `/app/config` | Model config (`models.yaml`), tool permissions (`tools.yaml`) |
 
 Both persist across container rebuilds.
+
+`config/tools.yaml` controls per-tool permissions. The `bash` tool is always approval-gated even if it is configured as `allow`.
 
 ### Running without Docker
 

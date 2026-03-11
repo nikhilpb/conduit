@@ -27,6 +27,7 @@ from conduit.schemas import SessionResponse
 from conduit.schemas import TranscriptMessage
 from conduit.schemas import ToolCall
 from conduit.schemas import UpdateModelRequest
+from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 from conduit.user_context import build_state_delta
 from conduit.user_context import coerce_turn_context
@@ -202,6 +203,10 @@ def _build_transcript(events) -> list[TranscriptMessage]:
                         args={},
                         status=status,
                         error=error,
+                        response=public_tool_response(
+                            part.function_response.name,
+                            part.function_response.response,
+                        ),
                     )
                 )
             if part.text and not getattr(part, "thought", False):
