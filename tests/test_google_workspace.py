@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from email import message_from_bytes
 
 from conduit.config import Settings
 from conduit.tools import google_workspace as google_workspace_module
@@ -119,6 +120,52 @@ def test_gmail_get_message_normalizes_headers_and_body(monkeypatch):
     }
 
 
+def test_gmail_create_draft_preserves_body_whitespace(monkeypatch):
+    calls = []
+
+    class FakeRunner:
+        def __init__(self, settings):
+            del settings
+
+        async def run_json(self, *command, params=None, body=None):
+            calls.append({"command": command, "params": params, "body": body})
+            return {
+                "id": "draft-1",
+                "message": {
+                    "id": "msg-1",
+                    "threadId": "thread-1",
+                },
+            }
+
+    monkeypatch.setattr(google_workspace_module, "GwsCliRunner", FakeRunner)
+    settings = Settings(_env_file=None, gws_enabled=True)
+    tools = _tools_by_name(google_workspace_module.build_google_workspace_tools(settings))
+
+    result = asyncio.run(
+        tools["gmail_create_draft"](
+            ["alice@example.com"],
+            "Trip update",
+            "  hello\n\n",
+        )
+    )
+
+    raw_message = calls[0]["body"]["message"]["raw"]
+    padding = "=" * (-len(raw_message) % 4)
+    parsed = message_from_bytes(base64.urlsafe_b64decode(f"{raw_message}{padding}"))
+
+    assert result == {
+        "ok": True,
+        "draft_id": "draft-1",
+        "message_id": "msg-1",
+        "thread_id": "thread-1",
+        "to": ["alice@example.com"],
+        "cc": [],
+        "bcc": [],
+        "subject": "Trip update",
+    }
+    assert parsed.get_payload(decode=True).decode() == "  hello\n\n"
+
+
 def test_docs_append_text_fetches_document_then_batch_updates(monkeypatch):
     calls = []
 
@@ -186,6 +233,76 @@ def test_docs_append_text_fetches_document_then_batch_updates(monkeypatch):
                         "insertText": {
                             "location": {"index": 6},
                             "text": "World",
+                        }
+                    }
+                ]
+            },
+        },
+    ]
+
+
+def test_docs_create_document_appends_whitespace_initial_text(monkeypatch):
+    calls = []
+
+    class FakeRunner:
+        def __init__(self, settings):
+            del settings
+
+        async def run_json(self, *command, params=None, body=None):
+            calls.append(
+                {
+                    "command": command,
+                    "params": params,
+                    "body": body,
+                }
+            )
+            if command == ("docs", "documents", "create"):
+                return {"documentId": "doc-1"}
+            if command == ("docs", "documents", "get"):
+                return {
+                    "documentId": "doc-1",
+                    "body": {
+                        "content": [
+                            {"endIndex": 1},
+                        ]
+                    },
+                }
+            if command == ("docs", "documents", "batchUpdate"):
+                return {"replies": [{}]}
+            raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(google_workspace_module, "GwsCliRunner", FakeRunner)
+    settings = Settings(_env_file=None, gws_enabled=True)
+    tools = _tools_by_name(google_workspace_module.build_google_workspace_tools(settings))
+
+    result = asyncio.run(tools["docs_create_document"]("Notes", initial_text="\n"))
+
+    assert result == {
+        "ok": True,
+        "document_id": "doc-1",
+        "title": "Notes",
+        "url": "https://docs.google.com/document/d/doc-1/edit",
+    }
+    assert calls == [
+        {
+            "command": ("docs", "documents", "create"),
+            "params": None,
+            "body": {"title": "Notes"},
+        },
+        {
+            "command": ("docs", "documents", "get"),
+            "params": {"documentId": "doc-1"},
+            "body": None,
+        },
+        {
+            "command": ("docs", "documents", "batchUpdate"),
+            "params": {"documentId": "doc-1"},
+            "body": {
+                "requests": [
+                    {
+                        "insertText": {
+                            "location": {"index": 1},
+                            "text": "\n",
                         }
                     }
                 ]
@@ -268,6 +385,108 @@ def test_calendar_update_event_requires_complete_time_range(monkeypatch):
         "event_id": "event-1",
         "calendar_id": "primary",
     }
+
+
+def test_calendar_update_event_allows_clearing_text_fields(monkeypatch):
+    calls = []
+
+    class FakeRunner:
+        def __init__(self, settings):
+            del settings
+
+        async def run_json(self, *command, params=None, body=None):
+            calls.append({"command": command, "params": params, "body": body})
+            return {
+                "id": "event-1",
+                "summary": "",
+                "description": "",
+                "location": "",
+                "status": "confirmed",
+                "start": {"dateTime": "2026-03-11T10:00:00+00:00"},
+                "end": {"dateTime": "2026-03-11T11:00:00+00:00"},
+            }
+
+    monkeypatch.setattr(google_workspace_module, "GwsCliRunner", FakeRunner)
+    settings = Settings(_env_file=None, gws_enabled=True)
+    tools = _tools_by_name(google_workspace_module.build_google_workspace_tools(settings))
+
+    result = asyncio.run(
+        tools["calendar_update_event"](
+            "event-1",
+            summary="",
+            location="",
+            description="",
+        )
+    )
+
+    assert result["ok"] is True
+    assert calls == [
+        {
+            "command": ("calendar", "events", "patch"),
+            "params": {
+                "calendarId": "primary",
+                "eventId": "event-1",
+                "sendUpdates": "none",
+            },
+            "body": {
+                "summary": "",
+                "location": "",
+                "description": "",
+            },
+        }
+    ]
+
+
+def test_docs_replace_text_preserves_whitespace_search_and_replace(monkeypatch):
+    calls = []
+
+    class FakeRunner:
+        def __init__(self, settings):
+            del settings
+
+        async def run_json(self, *command, params=None, body=None):
+            calls.append({"command": command, "params": params, "body": body})
+            return {
+                "replies": [
+                    {
+                        "replaceAllText": {
+                            "occurrencesChanged": 1,
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(google_workspace_module, "GwsCliRunner", FakeRunner)
+    settings = Settings(_env_file=None, gws_enabled=True)
+    tools = _tools_by_name(google_workspace_module.build_google_workspace_tools(settings))
+
+    result = asyncio.run(tools["docs_replace_text"]("doc-1", " ", " "))
+
+    assert result == {
+        "ok": True,
+        "document_id": "doc-1",
+        "occurrences_changed": 1,
+        "url": "https://docs.google.com/document/d/doc-1/edit",
+    }
+    assert calls == [
+        {
+            "command": ("docs", "documents", "batchUpdate"),
+            "params": {"documentId": "doc-1"},
+            "body": {
+                "requests": [
+                    {
+                        "replaceAllText": {
+                            "containsText": {
+                                "text": " ",
+                                "matchCase": False,
+                            },
+                            "replaceText": " ",
+                        }
+                    }
+                ]
+            },
+        }
+    ]
 
 
 def _tools_by_name(tools):

@@ -16,14 +16,20 @@ RUN set -eux; \
       arm64) gws_arch="aarch64" ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
-    url="https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/gws-${gws_arch}-unknown-linux-gnu.tar.gz"; \
+    archive_name="gws-${gws_arch}-unknown-linux-gnu.tar.gz"; \
+    url="https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${archive_name}"; \
+    checksum_url="${url}.sha256"; \
     python -c "import pathlib, sys, urllib.request; \
 pathlib.Path(sys.argv[2]).write_bytes(urllib.request.urlopen(sys.argv[1]).read())" \
-      "$url" /tmp/gws.tar.gz; \
+      "$url" "/tmp/${archive_name}"; \
+    python -c "import pathlib, sys, urllib.request; \
+pathlib.Path(sys.argv[2]).write_bytes(urllib.request.urlopen(sys.argv[1]).read())" \
+      "$checksum_url" "/tmp/${archive_name}.sha256"; \
+    (cd /tmp && sha256sum -c "${archive_name}.sha256"); \
     mkdir -p /tmp/gws-extract; \
-    tar -xzf /tmp/gws.tar.gz -C /tmp/gws-extract --strip-components=1; \
+    tar -xzf "/tmp/${archive_name}" -C /tmp/gws-extract --strip-components=1; \
     install -m 0755 /tmp/gws-extract/gws /usr/local/bin/gws; \
-    rm -rf /tmp/gws.tar.gz /tmp/gws-extract
+    rm -rf "/tmp/${archive_name}" "/tmp/${archive_name}.sha256" /tmp/gws-extract
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project

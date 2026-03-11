@@ -185,7 +185,7 @@ def build_google_workspace_tools(settings: Settings) -> list:
 
         cleaned_to = _clean_email_list(to)
         cleaned_subject = _coerce_text(subject)
-        cleaned_body = _coerce_text(body_text)
+        cleaned_body = _coerce_exact_text(body_text)
         cleaned_cc = _clean_email_list(cc)
         cleaned_bcc = _clean_email_list(bcc)
 
@@ -193,7 +193,7 @@ def build_google_workspace_tools(settings: Settings) -> list:
             return _error_result(message="to must include at least one email address")
         if not cleaned_subject:
             return _error_result(message="subject must not be empty")
-        if not cleaned_body:
+        if cleaned_body is None or cleaned_body == "":
             return _error_result(message="body_text must not be empty")
 
         message = EmailMessage()
@@ -291,12 +291,12 @@ def build_google_workspace_tools(settings: Settings) -> list:
         """Create a timed calendar event without sending guest notifications."""
 
         cleaned_calendar_id = _coerce_text(calendar_id) or "primary"
-        cleaned_summary = _coerce_text(summary)
-        cleaned_location = _coerce_text(location)
-        cleaned_description = _coerce_text(description)
+        cleaned_summary = _coerce_exact_text(summary)
+        cleaned_location = _coerce_exact_text(location)
+        cleaned_description = _coerce_exact_text(description)
         cleaned_attendees = _clean_email_list(attendees)
 
-        if not cleaned_summary:
+        if cleaned_summary is None or cleaned_summary == "":
             return _error_result(message="summary must not be empty")
 
         try:
@@ -343,9 +343,9 @@ def build_google_workspace_tools(settings: Settings) -> list:
 
         cleaned_event_id = _coerce_text(event_id)
         cleaned_calendar_id = _coerce_text(calendar_id) or "primary"
-        cleaned_summary = _coerce_text(summary)
-        cleaned_location = _coerce_text(location)
-        cleaned_description = _coerce_text(description)
+        cleaned_summary = _coerce_exact_text(summary)
+        cleaned_location = _coerce_exact_text(location)
+        cleaned_description = _coerce_exact_text(description)
         cleaned_attendees = None if attendees is None else _clean_email_list(attendees)
 
         if not cleaned_event_id:
@@ -353,8 +353,8 @@ def build_google_workspace_tools(settings: Settings) -> list:
 
         try:
             body: dict[str, Any] = {}
-            if cleaned_summary:
-                body["summary"] = cleaned_summary
+            if summary is not None:
+                body["summary"] = cleaned_summary or ""
             if start_time is not None or end_time is not None:
                 if not _coerce_text(start_time) or not _coerce_text(end_time):
                     raise ValueError("start_time and end_time must both be provided")
@@ -364,10 +364,10 @@ def build_google_workspace_tools(settings: Settings) -> list:
                 )
                 body["start"] = {"dateTime": normalized_start}
                 body["end"] = {"dateTime": normalized_end}
-            if cleaned_location is not None:
-                body["location"] = cleaned_location
-            if cleaned_description is not None:
-                body["description"] = cleaned_description
+            if location is not None:
+                body["location"] = cleaned_location or ""
+            if description is not None:
+                body["description"] = cleaned_description or ""
             if cleaned_attendees is not None:
                 body["attendees"] = [{"email": email} for email in cleaned_attendees]
             if not body:
@@ -464,7 +464,7 @@ def build_google_workspace_tools(settings: Settings) -> list:
         """Create a Google Doc and optionally seed it with initial text."""
 
         cleaned_title = _coerce_text(title)
-        cleaned_initial_text = _coerce_text(initial_text)
+        cleaned_initial_text = _coerce_exact_text(initial_text)
         if not cleaned_title:
             return _error_result(message="title must not be empty")
 
@@ -480,7 +480,7 @@ def build_google_workspace_tools(settings: Settings) -> list:
             if not document_id:
                 raise ValueError("Google Docs create response did not include documentId")
 
-            if cleaned_initial_text:
+            if cleaned_initial_text is not None and cleaned_initial_text != "":
                 await _append_text_to_document(
                     runner,
                     document_id=document_id,
@@ -500,10 +500,10 @@ def build_google_workspace_tools(settings: Settings) -> list:
         """Append plain text to the end of a Google Doc."""
 
         cleaned_document_id = _coerce_text(document_id)
-        cleaned_text = _coerce_text(text)
+        cleaned_text = _coerce_exact_text(text)
         if not cleaned_document_id:
             return _error_result(message="document_id must not be empty")
-        if not cleaned_text:
+        if cleaned_text is None or cleaned_text == "":
             return _error_result(message="text must not be empty")
 
         try:
@@ -530,11 +530,11 @@ def build_google_workspace_tools(settings: Settings) -> list:
         """Replace plain text within a Google Doc."""
 
         cleaned_document_id = _coerce_text(document_id)
-        cleaned_search_text = _coerce_text(search_text)
-        cleaned_replace_text = _coerce_text(replace_text) or ""
+        cleaned_search_text = _coerce_exact_text(search_text)
+        cleaned_replace_text = _coerce_exact_text(replace_text) or ""
         if not cleaned_document_id:
             return _error_result(message="document_id must not be empty")
-        if not cleaned_search_text:
+        if cleaned_search_text is None or cleaned_search_text == "":
             return _error_result(message="search_text must not be empty")
 
         try:
@@ -975,6 +975,12 @@ def _coerce_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _coerce_exact_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _truncate_text(value: str, limit: int) -> str:
