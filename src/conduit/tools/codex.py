@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import shutil
@@ -12,6 +13,8 @@ from typing import Any
 from conduit.config import Settings
 from conduit.repos import RepoConfig
 from conduit.repos import load_repos
+
+logger = logging.getLogger(__name__)
 
 
 def build_codex_tool(settings: Settings):
@@ -30,6 +33,8 @@ def build_codex_tool(settings: Settings):
         Returns:
             Result with PR URL on success, or error details on failure.
         """
+
+        logger.info("codex_task called: repo=%s prompt=%r", repo, prompt[:80])
 
         # --- validate repo ---
         if repo not in repos:
@@ -62,6 +67,7 @@ def build_codex_tool(settings: Settings):
             os.makedirs(work_dir, exist_ok=True)
 
             # --- clone ---
+            logger.info("Cloning %s into %s", repo_cfg.url, work_dir)
             rc, _stdout, stderr = await _run(
                 [
                     "git", "clone", "--depth=1",
@@ -89,15 +95,16 @@ def build_codex_tool(settings: Settings):
             head_before = head_before.strip()
 
             # --- run codex ---
+            logger.info("Running codex on branch %s", branch)
             codex_env = {**os.environ, "OPENAI_API_KEY": api_key}
             try:
                 rc, _stdout, stderr = await _run(
-                    ["codex", "--approval-mode", "full-auto", "-q", prompt],
+                    ["codex", "exec", "--full-auto", prompt],
                     cwd=work_dir,
                     env=codex_env,
                     timeout=settings.codex_timeout_seconds,
                 )
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, TimeoutError):
                 return {
                     "ok": False,
                     "error": f"Codex timed out after {int(settings.codex_timeout_seconds)}s",
@@ -171,8 +178,15 @@ def build_codex_tool(settings: Settings):
                 "message": message,
             }
 
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.error("codex_task timed out")
             return {"ok": False, "error": "Operation timed out"}
+        except OSError as exc:
+            logger.error("codex_task OSError: %s", exc)
+            return {"ok": False, "error": f"System error: {exc}"}
+        except Exception as exc:
+            logger.exception("codex_task unexpected error")
+            return {"ok": False, "error": f"Unexpected error: {exc}"}
 
         finally:
             # Clean up the temp clone
