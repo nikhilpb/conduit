@@ -86,6 +86,8 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.
 - Tool calls get explicit UI treatment; approval requests are surfaced inline.
+- The Flutter client hides internal `adk_request_confirmation` tool-call transcript items; approvals only appear through the dedicated approval UI.
+- Standalone tool-call transcript items render as chips without an enclosing chat bubble; `bash` chips are labeled as `Bash(<truncated command>)`.
 - Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
 - `bash` tool results now preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, and the Flutter client renders those details inline for completed bash calls.
 - The websocket/interactive chat runner exposes `bash`; the plain HTTP `/chat` runner intentionally excludes `bash` because that surface cannot complete approval handshakes.

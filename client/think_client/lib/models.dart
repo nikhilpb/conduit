@@ -47,6 +47,12 @@ class SessionSummary {
   final String title;
 }
 
+const Set<String> _hiddenToolCallNames = {'adk_request_confirmation'};
+
+bool isVisibleToolCallName(String? name) {
+  return name != null && !_hiddenToolCallNames.contains(name);
+}
+
 class ToolCall {
   const ToolCall({
     this.toolCallId,
@@ -78,6 +84,7 @@ class ToolCall {
   final Map<String, dynamic>? response;
 
   bool get isFailed => status == 'failed';
+  bool get isVisible => isVisibleToolCallName(name);
 
   Map<String, dynamic> toJson() => {
     'tool_call_id': toolCallId,
@@ -108,6 +115,7 @@ class TranscriptMessage {
       thinkingTrace: json['thinking_trace'] as String? ?? '',
       toolCalls: (json['tool_calls'] as List<dynamic>? ?? const [])
           .map((item) => ToolCall.fromJson(item as Map<String, dynamic>))
+          .where((toolCall) => toolCall.isVisible)
           .toList(),
     );
   }
@@ -171,6 +179,7 @@ class ChatReply {
       reply: json['reply'] as String? ?? '',
       toolCalls: (json['tool_calls'] as List<dynamic>? ?? const [])
           .map((item) => ToolCall.fromJson(item as Map<String, dynamic>))
+          .where((toolCall) => toolCall.isVisible)
           .toList(),
     );
   }

@@ -720,14 +720,15 @@ class _ChatScreenState extends State<ChatScreen> {
   void _handleToolCall(ChatServerEvent event) {
     final clientMessageId = _clientMessageIdForTurn(event.turnId);
     final toolName = event.tool;
-    if (clientMessageId == null || toolName == null) {
+    if (clientMessageId == null || !isVisibleToolCallName(toolName)) {
       return;
     }
+    final visibleToolName = toolName!;
     final pendingTurn = _pendingTurns[clientMessageId];
     if (pendingTurn == null) {
       return;
     }
-    final toolCallId = event.toolCallId ?? toolName;
+    final toolCallId = event.toolCallId ?? visibleToolName;
     if (pendingTurn.seenToolCallIds.contains(toolCallId)) {
       return;
     }
@@ -740,7 +741,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _toolCallsForMessage(assistantMessageId),
       ToolCall(
         toolCallId: toolCallId,
-        name: toolName,
+        name: visibleToolName,
         args: event.args,
         status: event.status ?? 'pending',
         error: event.error,
@@ -759,9 +760,10 @@ class _ChatScreenState extends State<ChatScreen> {
   void _handleToolResult(ChatServerEvent event) {
     final clientMessageId = _clientMessageIdForTurn(event.turnId);
     final toolName = event.tool;
-    if (clientMessageId == null || toolName == null) {
+    if (clientMessageId == null || !isVisibleToolCallName(toolName)) {
       return;
     }
+    final visibleToolName = toolName!;
     final pendingTurn = _pendingTurns[clientMessageId];
     if (pendingTurn == null) {
       return;
@@ -775,7 +777,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _toolCallsForMessage(assistantMessageId),
       ToolCall(
         toolCallId: event.toolCallId,
-        name: toolName,
+        name: visibleToolName,
         args: const {},
         status: event.status ?? 'completed',
         error: event.error,
@@ -1911,6 +1913,11 @@ class MessageBubble extends StatelessWidget {
       bottomLeft: Radius.circular(isUser ? 24 : 6),
       bottomRight: Radius.circular(isUser ? 6 : 24),
     );
+    final isToolOnlyMessage =
+        message.text.isEmpty &&
+        message.thinkingTrace.isEmpty &&
+        message.toolCalls.isNotEmpty &&
+        !isPending;
 
     return Column(
       crossAxisAlignment: alignment,
@@ -1922,65 +1929,79 @@ class MessageBubble extends StatelessWidget {
           ).textTheme.labelMedium?.copyWith(color: const Color(0xFF6B7280)),
         ),
         const SizedBox(height: 6),
-        Container(
-          constraints: const BoxConstraints(maxWidth: 520),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: bubbleColor,
-            borderRadius: bubbleRadius,
-            border: isUser ? null : Border.all(color: const Color(0xFFE6DDCF)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!isUser && message.thinkingTrace.isNotEmpty) ...[
-                ThoughtTraceCard(trace: message.thinkingTrace),
-                if (message.text.isNotEmpty ||
-                    message.toolCalls.isNotEmpty ||
-                    isPending)
-                  const SizedBox(height: 10),
-              ],
-              if (message.text.isNotEmpty)
-                isUser
-                    ? SelectableText(
-                        message.text,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: foregroundColor,
-                          height: 1.45,
+        if (isToolOnlyMessage)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: message.toolCalls
+                  .map(
+                    (toolCall) => ToolChip(toolCall: toolCall, isUser: isUser),
+                  )
+                  .toList(),
+            ),
+          )
+        else
+          Container(
+            constraints: const BoxConstraints(maxWidth: 520),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: bubbleRadius,
+              border: isUser
+                  ? null
+                  : Border.all(color: const Color(0xFFE6DDCF)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!isUser && message.thinkingTrace.isNotEmpty) ...[
+                  ThoughtTraceCard(trace: message.thinkingTrace),
+                  if (message.text.isNotEmpty ||
+                      message.toolCalls.isNotEmpty ||
+                      isPending)
+                    const SizedBox(height: 10),
+                ],
+                if (message.text.isNotEmpty)
+                  isUser
+                      ? SelectableText(
+                          message.text,
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(color: foregroundColor, height: 1.45),
+                        )
+                      : MarkdownBody(
+                          data: message.text,
+                          selectable: true,
+                          fitContent: true,
+                          styleSheet: _assistantMarkdownStyleSheet(
+                            context,
+                            foregroundColor,
+                          ),
                         ),
-                      )
-                    : MarkdownBody(
-                        data: message.text,
-                        selectable: true,
-                        fitContent: true,
-                        styleSheet: _assistantMarkdownStyleSheet(
-                          context,
-                          foregroundColor,
-                        ),
-                      ),
-              if (message.toolCalls.isNotEmpty) ...[
-                if (message.text.isNotEmpty) const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: message.toolCalls
-                      .map(
-                        (toolCall) =>
-                            ToolChip(toolCall: toolCall, isUser: isUser),
-                      )
-                      .toList(),
-                ),
+                if (message.toolCalls.isNotEmpty) ...[
+                  if (message.text.isNotEmpty) const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: message.toolCalls
+                        .map(
+                          (toolCall) =>
+                              ToolChip(toolCall: toolCall, isUser: isUser),
+                        )
+                        .toList(),
+                  ),
+                ],
+                if (isPending) ...[
+                  if (message.text.isNotEmpty || message.toolCalls.isNotEmpty)
+                    const SizedBox(height: 10),
+                  PendingReplyIndicator(
+                    color: isUser ? Colors.white70 : const Color(0xFF7B4B2A),
+                  ),
+                ],
               ],
-              if (isPending) ...[
-                if (message.text.isNotEmpty || message.toolCalls.isNotEmpty)
-                  const SizedBox(height: 10),
-                PendingReplyIndicator(
-                  color: isUser ? Colors.white70 : const Color(0xFF7B4B2A),
-                ),
-              ],
-            ],
+            ),
           ),
-        ),
         const SizedBox(height: 6),
         Text(
           _formatTimestamp(message.createdAt),
@@ -2405,7 +2426,7 @@ String _toolCallLabel(ToolCall toolCall) {
         (toolCall.args['command'] as String?)?.trim() ?? 'command',
         30,
       );
-      return 'bash($command)';
+      return 'Bash($command)';
     case 'web_search':
       final query = _ellipsize(
         (toolCall.args['query'] as String?)?.trim() ?? 'query',
