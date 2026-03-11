@@ -13,3 +13,5 @@ tools:
     mode: allow
   polymarket_get_price_history:
     mode: allow
+  recipe_lookup:
+    mode: allow

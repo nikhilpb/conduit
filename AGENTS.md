@@ -21,6 +21,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `web_search`: Brave Search API first, Ecosia HTML fallback.
   - `web_fetch`: HTTP/HTML/text fetch with cleaned content extraction.
   - `polymarket_search_markets` / `polymarket_list_markets` / `polymarket_get_market` / `polymarket_get_price_history`: public Polymarket market lookup, current pricing, price history, liquidity, and volume snapshots.
+  - `recipe_lookup`: read-only lookup against a local `recipes.json` catalog when `config/recipes.yaml` resolves to an existing file.
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Supported base models:
@@ -63,10 +64,14 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - `src/conduit/tool_permissions.py`
   - Loads `allow` / `ask` / `deny` policy from `config/tools.yaml`.
   - Enforces that `bash` stays approval-gated even if configured as `allow`.
+- `src/conduit/recipe_catalog.py`
+  - Resolves the configured recipe catalog path and ranks recipe matches.
 - `src/conduit/tools/bash.py`
   - Executes `bash -lc` on the host with structured stdout/stderr, timeout, and exit-code results.
 - `src/conduit/tools/polymarket.py`
   - Public Polymarket Gamma/CLOB API integration for market lookup and pricing history.
+- `src/conduit/tools/recipe_lookup.py`
+  - Local recipe catalog lookup tool.
 
 ## Client Structure
 
@@ -110,6 +115,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Important paths:
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`
+  - recipe catalog config: `config/recipes.yaml`
   - tool permissions: `config/tools.yaml`
 - Default backend bind: `0.0.0.0:18423`
 - Docker Compose mounts `./data` and `./config` into the container and publishes `18423`.

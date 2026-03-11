@@ -1,0 +1,5 @@
+catalog:
+  required: false
+  paths:
+    - /Users/nikhilbhat/git/skills/recipe-lookup/data/recipes.json
+    - /app/external-skills/recipe-lookup/data/recipes.json

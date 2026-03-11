@@ -13,6 +13,7 @@ from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_permissions import permission_summary
 from conduit.tools.bash import build_bash_tool
 from conduit.tools.polymarket import build_polymarket_tools
+from conduit.tools.recipe_lookup import build_recipe_lookup_tool
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
 from conduit.user_context import build_context_instructions
@@ -29,7 +30,8 @@ def build_root_agent(
     web_search = build_web_search_tool(settings)
     web_fetch = build_web_fetch_tool(settings)
     polymarket_tools = build_polymarket_tools(settings)
-    tools = [
+    recipe_lookup = build_recipe_lookup_tool(settings)
+    tools: list[object] = [
         web_search,
         web_fetch,
         *polymarket_tools,
@@ -42,6 +44,7 @@ def build_root_agent(
         "Use web_search when you need to discover fresh information. ",
         "Use web_fetch when you need to inspect a specific page or URL in detail. ",
     ]
+
     if enable_bash:
         bash = build_bash_tool(settings)
         tools.insert(2, bash)
@@ -57,6 +60,19 @@ def build_root_agent(
                 "command produced no visible output when both stdout and stderr are empty. ",
             ]
         )
+
+    if recipe_lookup is not None:
+        description_parts.append("look up recipes from a local catalog, ")
+        instruction_parts.extend(
+            [
+                "Use recipe_lookup when the user asks for recipes, ingredients, steps, or macros ",
+                "for dishes in the local recipe catalog. ",
+                "The recipe catalog is local and read-only through this tool, so do not promise ",
+                "that you can add or edit recipes unless a separate write tool is available. ",
+            ]
+        )
+        tools.append(recipe_lookup)
+
     provider = infer_provider(model_name)
     model = model_name
     if provider == "anthropic":

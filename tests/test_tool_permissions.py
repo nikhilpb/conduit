@@ -24,6 +24,7 @@ tools:
     assert permissions["polymarket_list_markets"] == "allow"
     assert permissions["polymarket_get_market"] == "allow"
     assert permissions["polymarket_get_price_history"] == "allow"
+    assert permissions["recipe_lookup"] == "allow"
     assert permissions["send_email"] == "deny"
 
 

@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     bash_timeout_seconds: float = 30.0
     bash_max_output_chars: int = 12_000
     polymarket_timeout_seconds: float = 15.0
+    recipe_catalog_config_path: str = "config/recipes.yaml"
+    recipe_lookup_max_results: int = 3
     google_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
