@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     fetch_max_chars: int = 12_000
     fetch_user_agent: str = "Conduit/0.1"
     polymarket_timeout_seconds: float = 15.0
+    codex_timeout_seconds: float = 300.0
+    codex_work_dir: str = "/tmp/conduit-codex"
+    repos_config_path: str = "config/repos.yaml"
     google_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
@@ -52,6 +55,11 @@ class Settings(BaseSettings):
     brave_api_key: str | None = Field(
         default=None,
         validation_alias="BRAVE_API_KEY",
+        repr=False,
+    )
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_API_KEY",
         repr=False,
     )
 
