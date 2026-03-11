@@ -17,6 +17,7 @@ DEFAULT_TOOL_PERMISSIONS: dict[str, ToolPermissionMode] = {
     "polymarket_list_markets": "allow",
     "polymarket_get_market": "allow",
     "polymarket_get_price_history": "allow",
+    "codex_task": "ask",
 }
 
 
