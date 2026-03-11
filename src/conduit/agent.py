@@ -38,6 +38,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
             "You are Conduit, a research assistant. "
             "Use web_search when you need to discover fresh information. "
             "Use web_fetch when you need to inspect a specific page or URL in detail. "
+            "If a tool reports an error, treat it as a failed attempt and keep working when useful. "
             "Prefer citing concrete facts from fetched pages when possible. "
             "If you are uncertain, say so directly."
         ),

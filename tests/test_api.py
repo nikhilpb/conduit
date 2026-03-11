@@ -237,6 +237,36 @@ def test_build_transcript_includes_thinking_trace():
     assert transcript[0].tool_calls == []
 
 
+def test_build_transcript_includes_failed_tool_result():
+    events = [
+        Event(
+            invocation_id="inv-test",
+            author="web_fetch",
+            content=types.Content(
+                role="tool",
+                parts=[
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            id="tc_1",
+                            name="web_fetch",
+                            response={"ok": False, "error": "HTTP 403 Forbidden"},
+                        )
+                    )
+                ],
+            ),
+        )
+    ]
+
+    transcript = _build_transcript(events)
+
+    assert len(transcript) == 1
+    assert len(transcript[0].tool_calls) == 1
+    assert transcript[0].tool_calls[0].tool_call_id == "tc_1"
+    assert transcript[0].tool_calls[0].name == "web_fetch"
+    assert transcript[0].tool_calls[0].status == "failed"
+    assert transcript[0].tool_calls[0].error == "HTTP 403 Forbidden"
+
+
 def test_before_model_callback_accepts_keyword_callback_context():
     agent = build_root_agent(
         Settings(_env_file=None),

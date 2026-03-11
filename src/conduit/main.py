@@ -27,6 +27,7 @@ from conduit.schemas import SessionResponse
 from conduit.schemas import TranscriptMessage
 from conduit.schemas import ToolCall
 from conduit.schemas import UpdateModelRequest
+from conduit.tool_call_utils import tool_response_status
 from conduit.user_context import build_state_delta
 from conduit.user_context import coerce_turn_context
 from conduit.websocket_chat import WebSocketChatManager
@@ -186,8 +187,21 @@ def _build_transcript(events) -> list[TranscriptMessage]:
             if getattr(part, "function_call", None):
                 tool_calls.append(
                     ToolCall(
+                        tool_call_id=part.function_call.id,
                         name=part.function_call.name,
                         args=dict(part.function_call.args or {}),
+                        status="pending",
+                    )
+                )
+            if getattr(part, "function_response", None):
+                status, error = tool_response_status(part.function_response.response)
+                tool_calls.append(
+                    ToolCall(
+                        tool_call_id=part.function_response.id,
+                        name=part.function_response.name or "tool",
+                        args={},
+                        status=status,
+                        error=error,
                     )
                 )
             if part.text and not getattr(part, "thought", False):

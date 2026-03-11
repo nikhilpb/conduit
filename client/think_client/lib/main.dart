@@ -667,6 +667,9 @@ class _ChatScreenState extends State<ChatScreen> {
       case 'tool_call':
         _handleToolCall(event);
         return;
+      case 'tool_result':
+        _handleToolResult(event);
+        return;
       case 'thought':
         _handleThought(event);
         return;
@@ -732,16 +735,55 @@ class _ChatScreenState extends State<ChatScreen> {
       pendingTurn,
       serverMessageId: event.messageId,
     );
-    final updatedToolCalls = [
-      ..._toolCallsForMessage(assistantMessageId),
-      ToolCall(name: toolName, args: event.args),
-    ];
+    final updatedToolCalls = _mergeToolCalls(
+      _toolCallsForMessage(assistantMessageId),
+      ToolCall(
+        toolCallId: toolCallId,
+        name: toolName,
+        args: event.args,
+        status: event.status ?? 'pending',
+        error: event.error,
+      ),
+    );
 
     _updateAssistantMessage(
       clientMessageId: clientMessageId,
       assistantMessageId: assistantMessageId,
       toolCalls: updatedToolCalls,
       seenToolCallIds: [...pendingTurn.seenToolCallIds, toolCallId],
+    );
+  }
+
+  void _handleToolResult(ChatServerEvent event) {
+    final clientMessageId = _clientMessageIdForTurn(event.turnId);
+    final toolName = event.tool;
+    if (clientMessageId == null || toolName == null) {
+      return;
+    }
+    final pendingTurn = _pendingTurns[clientMessageId];
+    if (pendingTurn == null) {
+      return;
+    }
+
+    final assistantMessageId = _assistantMessageIdForPending(
+      pendingTurn,
+      serverMessageId: event.messageId,
+    );
+    final updatedToolCalls = _mergeToolCalls(
+      _toolCallsForMessage(assistantMessageId),
+      ToolCall(
+        toolCallId: event.toolCallId,
+        name: toolName,
+        args: const {},
+        status: event.status ?? 'completed',
+        error: event.error,
+      ),
+    );
+
+    _updateAssistantMessage(
+      clientMessageId: clientMessageId,
+      assistantMessageId: assistantMessageId,
+      toolCalls: updatedToolCalls,
     );
   }
 
@@ -911,6 +953,45 @@ class _ChatScreenState extends State<ChatScreen> {
   List<ToolCall> _toolCallsForMessage(String messageId) {
     final message = _messageById(messageId);
     return message?.toolCalls ?? const [];
+  }
+
+  List<ToolCall> _mergeToolCalls(
+    List<ToolCall> existingToolCalls,
+    ToolCall nextToolCall,
+  ) {
+    final existingIndex = _toolCallIndex(existingToolCalls, nextToolCall);
+    if (existingIndex < 0) {
+      return [...existingToolCalls, nextToolCall];
+    }
+
+    final currentToolCall = existingToolCalls[existingIndex];
+    final mergedToolCall = ToolCall(
+      toolCallId: nextToolCall.toolCallId ?? currentToolCall.toolCallId,
+      name: nextToolCall.name,
+      args: nextToolCall.args.isNotEmpty
+          ? nextToolCall.args
+          : currentToolCall.args,
+      status: nextToolCall.status,
+      error: nextToolCall.status == 'completed'
+          ? null
+          : (nextToolCall.error ?? currentToolCall.error),
+    );
+
+    final nextToolCalls = [...existingToolCalls];
+    nextToolCalls[existingIndex] = mergedToolCall;
+    return nextToolCalls;
+  }
+
+  int _toolCallIndex(List<ToolCall> toolCalls, ToolCall nextToolCall) {
+    final toolCallId = nextToolCall.toolCallId;
+    if (toolCallId != null && toolCallId.isNotEmpty) {
+      return toolCalls.indexWhere(
+        (toolCall) => toolCall.toolCallId == toolCallId,
+      );
+    }
+    return toolCalls.indexWhere(
+      (toolCall) => toolCall.name == nextToolCall.name,
+    );
   }
 
   bool _isAssistantMessagePending(TranscriptMessage message) {
@@ -2152,33 +2233,49 @@ class ToolChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: isUser
-            ? Colors.white.withValues(alpha: 0.16)
-            : const Color(0xFFF8F3EB),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: isUser ? Colors.white24 : const Color(0xFFDCCFBC),
+    final isFailed = toolCall.isFailed;
+    final chipColor = isUser
+        ? Colors.white.withValues(alpha: 0.16)
+        : isFailed
+        ? const Color(0xFFFFE7E5)
+        : const Color(0xFFF8F3EB);
+    final borderColor = isUser
+        ? Colors.white24
+        : isFailed
+        ? const Color(0xFFF2B8B5)
+        : const Color(0xFFDCCFBC);
+    final foregroundColor = isUser
+        ? Colors.white
+        : isFailed
+        ? const Color(0xFFB42318)
+        : const Color(0xFF7B4B2A);
+
+    return Tooltip(
+      message: toolCall.error ?? _toolCallLabel(toolCall),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: chipColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: borderColor),
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.build_outlined,
-            size: 14,
-            color: isUser ? Colors.white70 : const Color(0xFF7B4B2A),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            _toolCallLabel(toolCall),
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: isUser ? Colors.white : const Color(0xFF7B4B2A),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isFailed ? Icons.error_outline : Icons.build_outlined,
+              size: 14,
+              color: isUser ? Colors.white70 : foregroundColor,
             ),
-          ),
-        ],
+            const SizedBox(width: 6),
+            Text(
+              _toolCallLabel(toolCall),
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: foregroundColor),
+            ),
+          ],
+        ),
       ),
     );
   }

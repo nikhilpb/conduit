@@ -46,7 +46,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Wires `before_tool_callback` for permission policy.
 - `src/conduit/websocket_chat.py`
   - Own websocket protocol layer.
-  - Handles `ack`, `tool_call`, `thought`, `token`, `done`, `approval_required`, `error`.
+  - Handles `ack`, `tool_call`, `tool_result`, `thought`, `token`, `done`, `approval_required`, `error`.
   - Replays completed turns and reattaches to in-flight turns by `message_id`.
 - `src/conduit/sessions/sqlite_service.py`
   - Custom ADK `BaseSessionService`.
@@ -76,8 +76,14 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.
 - Tool calls get explicit UI treatment; approval requests are surfaced inline.
+- Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
 - Chat composer shows the currently active model label.
 - Current server URL comes from `--dart-define=CONDUIT_SERVER_URL=...` on first launch, but user settings can override later.
+
+## Tool Failure Semantics
+
+- `web_fetch` returns structured error payloads for invalid URLs, HTTP status failures, and network failures instead of raising; the agent can continue the turn after a failed fetch.
+- Tool-call records now carry `tool_call_id`, `status`, and optional `error` across HTTP transcript responses and websocket replay state.
 
 ## Configuration + Runtime
 

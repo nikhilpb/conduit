@@ -24,6 +24,7 @@ from conduit.model_registry import ModelRegistry
 from conduit.model_registry import persist_model_registry
 from conduit.model_registry import load_model_registry
 from conduit.sessions import SQLiteSessionService
+from conduit.tool_call_utils import tool_response_status
 
 
 @dataclass(slots=True)
@@ -35,10 +36,12 @@ class TurnResult:
 
 @dataclass(slots=True)
 class RuntimeTurnUpdate:
-    kind: Literal["tool_call", "reply"]
+    kind: Literal["tool_call", "tool_result", "reply"]
     tool_call_id: str | None = None
     tool_name: str | None = None
     tool_args: dict[str, Any] = field(default_factory=dict)
+    tool_status: str = "pending"
+    tool_error: str | None = None
     text: str = ""
 
 
@@ -198,6 +201,19 @@ class ConduitRuntime:
                     tool_args=dict(function_call.args or {}),
                 )
 
+            for function_response in event.get_function_responses():
+                if _is_internal_function_call(function_response.name):
+                    continue
+                tool_call_id = getattr(function_response, "id", None)
+                status, error = tool_response_status(function_response.response)
+                yield RuntimeTurnUpdate(
+                    kind="tool_result",
+                    tool_call_id=tool_call_id,
+                    tool_name=function_response.name,
+                    tool_status=status,
+                    tool_error=error,
+                )
+
             text = _extract_text(event.content)
             if not text:
                 continue
@@ -223,6 +239,7 @@ class ConduitRuntime:
 
         session = await self.get_or_create_session(session_id)
         tool_calls: list[dict[str, Any]] = []
+        tool_call_index_by_id: dict[str, int] = {}
         reply = ""
 
         async for update in self.stream_turn(
@@ -231,12 +248,37 @@ class ConduitRuntime:
             state_delta=state_delta,
         ):
             if update.kind == "tool_call":
-                tool_calls.append(
-                    {
-                        "name": update.tool_name or "",
-                        "args": dict(update.tool_args),
+                tool_call = {
+                    "tool_call_id": update.tool_call_id,
+                    "name": update.tool_name or "",
+                    "args": dict(update.tool_args),
+                    "status": "pending",
+                    "error": None,
+                }
+                if update.tool_call_id:
+                    tool_call_index_by_id[update.tool_call_id] = len(tool_calls)
+                tool_calls.append(tool_call)
+                continue
+            if update.kind == "tool_result":
+                tool_call = {
+                    "tool_call_id": update.tool_call_id,
+                    "name": update.tool_name or "",
+                    "args": {},
+                    "status": update.tool_status,
+                    "error": update.tool_error,
+                }
+                if update.tool_call_id and update.tool_call_id in tool_call_index_by_id:
+                    tool_calls[tool_call_index_by_id[update.tool_call_id]] = {
+                        **tool_calls[tool_call_index_by_id[update.tool_call_id]],
+                        "name": update.tool_name
+                        or tool_calls[tool_call_index_by_id[update.tool_call_id]]["name"],
+                        "status": update.tool_status,
+                        "error": update.tool_error,
                     }
-                )
+                else:
+                    if update.tool_call_id:
+                        tool_call_index_by_id[update.tool_call_id] = len(tool_calls)
+                    tool_calls.append(tool_call)
                 continue
             reply = update.text
 
