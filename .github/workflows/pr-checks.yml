@@ -1,0 +1,79 @@
+name: PR Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        run: uv sync --locked --dev
+
+      - name: Run backend tests
+        run: uv run pytest
+
+      - name: Build backend image
+        run: docker build --tag conduit-backend-pr-check .
+
+  client:
+    name: Client
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: client/think_client
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.1"
+          channel: stable
+          cache: true
+
+      - name: Install client dependencies
+        run: flutter pub get
+
+      - name: Analyze client
+        run: flutter analyze
+
+      - name: Run client tests
+        run: flutter test
+
+      - name: Build Android client
+        run: flutter build apk --debug --dart-define=CONDUIT_SERVER_URL=http://127.0.0.1:18423
