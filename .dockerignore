@@ -4,6 +4,7 @@
 .pytest_cache
 .adk
 .env
+secrets/
 .python-version
 __pycache__/
 *.pyc

@@ -19,6 +19,11 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Tooling is currently limited to:
   - `web_search`: Brave Search API first, Ecosia HTML fallback.
   - `web_fetch`: HTTP/HTML/text fetch with cleaned content extraction.
+  - Google Workspace tools, when `CONDUIT_GWS_ENABLED=true` and `gws` credentials are mounted:
+    - `gmail_search_messages` / `gmail_get_message` / `gmail_create_draft`
+    - `calendar_list_events` / `calendar_create_event` / `calendar_update_event`
+    - `drive_search_files`
+    - `docs_get_document` / `docs_create_document` / `docs_append_text` / `docs_replace_text`
   - `polymarket_search_markets` / `polymarket_list_markets` / `polymarket_get_market` / `polymarket_get_price_history`: public Polymarket market lookup, current pricing, price history, liquidity, and volume snapshots.
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
@@ -61,6 +66,10 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Converts client context into ADK state delta and hidden model instructions.
 - `src/conduit/tool_permissions.py`
   - Loads `allow` / `ask` / `deny` policy from `config/tools.yaml`.
+- `src/conduit/tools/google_workspace.py`
+  - Local `gws` CLI wrapper for Gmail, Calendar, Drive, and Docs.
+  - Validates binary + credential file presence when enabled.
+  - Normalizes CLI JSON into Conduit-owned tool outputs and structured errors.
 - `src/conduit/tools/polymarket.py`
   - Public Polymarket Gamma/CLOB API integration for market lookup and pricing history.
 
@@ -85,6 +94,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
 - Chat composer shows the currently active model label.
 - Current server URL comes from `--dart-define=CONDUIT_SERVER_URL=...` on first launch, but user settings can override later.
+- Workspace write tools default to `ask`; read/search tools default to `allow`.
 
 ## Tool Failure Semantics
 
@@ -102,8 +112,10 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`
   - tool permissions: `config/tools.yaml`
+  - Workspace credentials (Docker bind mount): `secrets/gws-credentials.json` -> `/app/secrets/gws-credentials.json`
 - Default backend bind: `0.0.0.0:18423`
-- Docker Compose mounts `./data` and `./config` into the container and publishes `18423`.
+- Docker Compose mounts `./data`, `./config`, and read-only `./secrets` into the container and publishes `18423`.
+- Docker image installs pinned `gws` binary release `0.11.1` into `/usr/local/bin/gws`.
 
 ## ADK Web
 

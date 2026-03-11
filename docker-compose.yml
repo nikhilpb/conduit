@@ -12,11 +12,18 @@ services:
       CONDUIT_DB_PATH: /app/data/conduit.db
       CONDUIT_MODELS_CONFIG_PATH: /app/config/models.yaml
       CONDUIT_TOOL_PERMISSIONS_PATH: /app/config/tools.yaml
+      CONDUIT_GWS_ENABLED: "${CONDUIT_GWS_ENABLED:-false}"
+      CONDUIT_GWS_BINARY_PATH: /usr/local/bin/gws
+      CONDUIT_GWS_CREDENTIALS_FILE: /app/secrets/gws-credentials.json
+      CONDUIT_GWS_ACCOUNT: "${CONDUIT_GWS_ACCOUNT:-}"
+      GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE: /app/secrets/gws-credentials.json
+      GOOGLE_WORKSPACE_CLI_ACCOUNT: "${CONDUIT_GWS_ACCOUNT:-}"
     ports:
       - "${CONDUIT_PUBLISH_IP:-127.0.0.1}:18423:18423"
     volumes:
       - ./data:/app/data
       - ./config:/app/config
+      - ./secrets:/app/secrets:ro
     healthcheck:
       test:
         [

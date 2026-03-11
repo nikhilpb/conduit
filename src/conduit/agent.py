@@ -10,6 +10,7 @@ from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
 from conduit.config import Settings
 from conduit.model_registry import infer_provider
 from conduit.tool_permissions import permission_summary
+from conduit.tools.google_workspace import build_google_workspace_tools
 from conduit.tools.polymarket import build_polymarket_tools
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
@@ -22,6 +23,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
     web_search = build_web_search_tool(settings)
     web_fetch = build_web_fetch_tool(settings)
     polymarket_tools = build_polymarket_tools(settings)
+    google_workspace_tools = build_google_workspace_tools(settings)
     provider = infer_provider(model_name)
     model = model_name
     if provider == "anthropic":
@@ -37,13 +39,22 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
         model=model,
         description=(
             "A personal assistant that can search the web, fetch webpages, "
-            "and inspect Polymarket prediction markets."
+            "inspect Polymarket prediction markets, and work with Gmail, "
+            "Google Calendar, Drive, and Docs when enabled by server policy."
         ),
         instruction=(
             "You are Conduit, a research assistant. "
             "Use web_search when you need to discover fresh information. "
             "Use web_fetch when you need to inspect a specific page or URL in detail. "
             "If a tool reports an error, treat it as a failed attempt and keep working when useful. "
+            "Use gmail_search_messages and gmail_get_message to inspect the mailbox when the user asks about email. "
+            "Use gmail_create_draft to create Gmail drafts, but do not claim an email was sent. "
+            "Use calendar_list_events to check the calendar. "
+            "Use calendar_create_event or calendar_update_event for timed calendar changes when the user asks to schedule or edit an event. "
+            "Use drive_search_files to look up files in Google Drive. "
+            "Use docs_get_document to inspect a Google Doc, docs_create_document to create one, "
+            "and docs_append_text or docs_replace_text for simple text edits. "
+            "Do not imply support for sending email, deleting calendar events, sharing Drive files, or rich document formatting unless a tool explicitly supports it. "
             "Use polymarket_search_markets or polymarket_list_markets to find "
             "prediction markets on Polymarket. "
             "Use polymarket_get_market for current prices, liquidity, and trade volume. "
@@ -60,6 +71,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
         tools=[
             web_search,
             web_fetch,
+            *google_workspace_tools,
             *polymarket_tools,
         ],
     )

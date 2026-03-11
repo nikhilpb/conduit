@@ -3,6 +3,28 @@ tools:
     mode: allow
   web_fetch:
     mode: allow
+  gmail_search_messages:
+    mode: allow
+  gmail_get_message:
+    mode: allow
+  gmail_create_draft:
+    mode: ask
+  calendar_list_events:
+    mode: allow
+  calendar_create_event:
+    mode: ask
+  calendar_update_event:
+    mode: ask
+  drive_search_files:
+    mode: allow
+  docs_get_document:
+    mode: allow
+  docs_create_document:
+    mode: ask
+  docs_append_text:
+    mode: ask
+  docs_replace_text:
+    mode: ask
   polymarket_search_markets:
     mode: allow
   polymarket_list_markets:

@@ -2333,6 +2333,58 @@ String _toolCallLabel(ToolCall toolCall) {
     case 'web_fetch':
       final url = (toolCall.args['url'] as String?)?.trim() ?? 'url';
       return 'web_fetch(${_shortenUrl(url)})';
+    case 'gmail_search_messages':
+      final query = _ellipsize(
+        (toolCall.args['query'] as String?)?.trim() ?? 'in:inbox',
+        38,
+      );
+      return 'gmail_search($query)';
+    case 'gmail_get_message':
+      final messageId =
+          (toolCall.args['message_id'] as String?)?.trim() ?? 'message';
+      return 'gmail_get(${_ellipsize(messageId, 20)})';
+    case 'gmail_create_draft':
+      final subject = _ellipsize(
+        (toolCall.args['subject'] as String?)?.trim() ?? 'draft',
+        30,
+      );
+      return 'gmail_draft($subject)';
+    case 'calendar_list_events':
+      return 'calendar_list_events';
+    case 'calendar_create_event':
+      final summary = _ellipsize(
+        (toolCall.args['summary'] as String?)?.trim() ?? 'event',
+        30,
+      );
+      return 'calendar_create($summary)';
+    case 'calendar_update_event':
+      final eventId =
+          (toolCall.args['event_id'] as String?)?.trim() ?? 'event';
+      return 'calendar_update(${_ellipsize(eventId, 20)})';
+    case 'drive_search_files':
+      final query = _ellipsize(
+        (toolCall.args['query'] as String?)?.trim() ?? 'query',
+        30,
+      );
+      return 'drive_search($query)';
+    case 'docs_get_document':
+      final documentId =
+          (toolCall.args['document_id'] as String?)?.trim() ?? 'document';
+      return 'docs_get(${_ellipsize(documentId, 20)})';
+    case 'docs_create_document':
+      final title = _ellipsize(
+        (toolCall.args['title'] as String?)?.trim() ?? 'document',
+        30,
+      );
+      return 'docs_create($title)';
+    case 'docs_append_text':
+      final documentId =
+          (toolCall.args['document_id'] as String?)?.trim() ?? 'document';
+      return 'docs_append(${_ellipsize(documentId, 20)})';
+    case 'docs_replace_text':
+      final documentId =
+          (toolCall.args['document_id'] as String?)?.trim() ?? 'document';
+      return 'docs_replace(${_ellipsize(documentId, 20)})';
     default:
       return toolCall.name;
   }
