@@ -11,5 +11,3 @@ tools:
     mode: allow
   polymarket_get_price_history:
     mode: allow
-  codex_task:
-    mode: ask

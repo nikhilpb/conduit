@@ -1,4 +1,0 @@
-repos:
-  conduit:
-    url: https://github.com/nikhilpb/conduit
-    default_branch: main
