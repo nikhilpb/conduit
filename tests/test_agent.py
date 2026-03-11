@@ -16,3 +16,5 @@ def test_build_root_agent_includes_polymarket_tools():
     assert "polymarket_list_markets" in tool_names
     assert "polymarket_get_market" in tool_names
     assert "polymarket_get_price_history" in tool_names
+    assert "future-looking probabilities" in agent.instruction
+    assert "check Polymarket first when it is relevant" in agent.instruction
