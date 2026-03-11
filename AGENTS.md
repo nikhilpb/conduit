@@ -63,6 +63,9 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Loads/persists model options and active model from `config/models.yaml`.
 - `src/conduit/user_context.py`
   - Converts client context into ADK state delta and hidden model instructions.
+- `src/conduit/context_estimate.py`
+  - Deterministic character/token estimation for app-facing context usage.
+  - Counts session text plus non-internal tool calls/results with a fixed chars-per-token ratio.
 - `src/conduit/tool_permissions.py`
   - Loads `allow` / `ask` / `deny` policy from `config/tools.yaml`.
   - Enforces that `bash` stays approval-gated even if configured as `allow`.
@@ -83,6 +86,8 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - HTTP client and websocket transport.
 - `client/think_client/lib/models.dart`
   - DTOs for health, sessions, transcript, websocket events, model settings.
+- `client/think_client/lib/context_estimate.dart`
+  - Client-side helpers for hidden-context estimation, tool-call char counting, and composer usage-bar formatting.
 - `client/think_client/lib/settings_store.dart`
   - Local persistence for server URL, location, personal instructions.
 
@@ -99,6 +104,8 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - `bash` tool results now preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, but the Flutter client no longer renders inline bash output; it keeps a single bash invocation chip in history and in live turns.
 - The websocket/interactive chat runner exposes `bash`; the plain HTTP `/chat` runner intentionally excludes `bash` because that surface cannot complete approval handshakes.
 - Chat composer shows the currently active model label.
+- Chat composer now shows an estimated next-turn context token count and a soft usage bar based on completed session history, the current draft, and hidden per-turn context.
+- `/health` exposes `context_chars_per_token`; session detail / HTTP chat responses expose `context_estimate`; websocket `tool_result` events expose `context_chars_delta` and `done` events include an authoritative `context_estimate`.
 - Current server URL comes from `--dart-define=CONDUIT_SERVER_URL=...` on first launch, but user settings can override later.
 
 ## Tool Failure Semantics

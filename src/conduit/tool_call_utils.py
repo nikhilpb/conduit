@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 from typing import Mapping
 
+from google.adk.flows.llm_flows.functions import (
+    REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+)
+
 
 BASH_PUBLIC_RESPONSE_FIELDS = (
     "ok",
@@ -19,6 +23,8 @@ BASH_PUBLIC_RESPONSE_FIELDS = (
     "timed_out",
     "error",
 )
+
+INTERNAL_TOOL_CALL_NAMES = frozenset({REQUEST_CONFIRMATION_FUNCTION_CALL_NAME})
 
 
 def tool_response_status(
@@ -53,6 +59,10 @@ def public_tool_response(
         if field_name in payload
     }
     return sanitized or None
+
+
+def is_internal_tool_call(name: str | None) -> bool:
+    return name in INTERNAL_TOOL_CALL_NAMES
 
 
 def _stringify_error(value: Any) -> str | None:

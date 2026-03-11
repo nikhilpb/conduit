@@ -14,9 +14,13 @@ import uvicorn
 
 from conduit.config import Settings
 from conduit.config import get_settings
+from conduit.context_estimate import CONTEXT_CHARS_PER_TOKEN
+from conduit.context_estimate import ContextEstimate
+from conduit.context_estimate import estimate_events_context
 from conduit.runtime import ConduitRuntime
 from conduit.schemas import ChatRequest
 from conduit.schemas import ChatResponse
+from conduit.schemas import ContextEstimateResponse
 from conduit.schemas import CreateSessionResponse
 from conduit.schemas import HealthResponse
 from conduit.schemas import ModelOptionResponse
@@ -62,6 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             provider_api_key_configured=resolved_settings.provider_api_key_configured_for(
                 active_model.provider
             ),
+            context_chars_per_token=CONTEXT_CHARS_PER_TOKEN,
         )
 
     @app.get("/settings/model", response_model=ModelSettingsResponse)
@@ -109,6 +114,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return SessionDetailResponse(
             session_id=session.id,
             messages=_build_transcript(session.events),
+            context_estimate=_context_estimate_response(
+                estimate_events_context(session.events)
+            ),
         )
 
     @app.delete("/sessions/{session_id}", status_code=204)
@@ -129,6 +137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session_id=result.session_id,
             reply=result.reply,
             tool_calls=[ToolCall(**tool_call) for tool_call in result.tool_calls],
+            context_estimate=_context_estimate_response(result.context_estimate),
         )
 
     @app.websocket("/chat")
@@ -260,6 +269,12 @@ def _build_model_settings_response(runtime: ConduitRuntime) -> ModelSettingsResp
             for option in registry.options
         ],
     )
+
+
+def _context_estimate_response(estimate: ContextEstimate) -> ContextEstimateResponse:
+    return ContextEstimateResponse(**estimate.to_payload())
+
+
 app = create_app()
 
 

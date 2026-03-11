@@ -19,12 +19,16 @@ from google.genai import types
 
 from conduit.agent import build_root_agent
 from conduit.config import Settings
+from conduit.context_estimate import ContextEstimate
+from conduit.context_estimate import empty_context_estimate
+from conduit.context_estimate import estimate_events_context
 from conduit.model_registry import ModelOption
 from conduit.model_registry import ModelRegistry
-from conduit.model_registry import persist_model_registry
 from conduit.model_registry import load_model_registry
+from conduit.model_registry import persist_model_registry
 from conduit.sessions import SQLiteSessionService
 from conduit.tool_permissions import effective_tool_permission
+from conduit.tool_call_utils import is_internal_tool_call
 from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 
@@ -34,6 +38,7 @@ class TurnResult:
     session_id: str
     reply: str
     tool_calls: list[dict[str, Any]]
+    context_estimate: ContextEstimate = field(default_factory=empty_context_estimate)
 
 
 @dataclass(slots=True)
@@ -118,6 +123,16 @@ class ConduitRuntime:
             session_id=session_id,
         )
 
+    async def get_session_context_estimate(self, session_id: str) -> ContextEstimate:
+        session = await self.session_service.get_session(
+            app_name=self.settings.app_name,
+            user_id=self.settings.internal_user_id,
+            session_id=session_id,
+        )
+        if session is None:
+            return empty_context_estimate()
+        return estimate_events_context(session.events)
+
     async def get_or_create_session(self, session_id: str | None = None) -> Session:
         """Return an existing session or create a new one."""
 
@@ -195,7 +210,7 @@ class ConduitRuntime:
                 continue
 
             for function_call in event.get_function_calls():
-                if _is_internal_function_call(function_call.name):
+                if is_internal_tool_call(function_call.name):
                     continue
                 tool_call_id = getattr(function_call, "id", None)
                 if not tool_call_id:
@@ -212,7 +227,7 @@ class ConduitRuntime:
                 )
 
             for function_response in event.get_function_responses():
-                if _is_internal_function_call(function_response.name):
+                if is_internal_tool_call(function_response.name):
                     continue
                 tool_call_id = getattr(function_response, "id", None)
                 response = public_tool_response(
@@ -301,10 +316,12 @@ class ConduitRuntime:
                 continue
             reply = update.text
 
+        context_estimate = await self.get_session_context_estimate(session.id)
         return TurnResult(
             session_id=session.id,
             reply=reply,
             tool_calls=tool_calls,
+            context_estimate=context_estimate,
         )
 
     def _apply_model_registry(self, registry: ModelRegistry) -> None:
@@ -347,7 +364,3 @@ def _extract_text(content: types.Content | None) -> str:
         if part.text and not getattr(part, "thought", False)
     ]
     return "\n".join(part for part in parts if part).strip()
-
-
-def _is_internal_function_call(name: str | None) -> bool:
-    return name in {"adk_request_confirmation"}

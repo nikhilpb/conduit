@@ -9,6 +9,8 @@ from google.genai import types
 import pytest
 
 from conduit.config import Settings
+from conduit.context_estimate import estimate_events_context
+from conduit.context_estimate import estimate_tool_result_chars
 from conduit.main import create_app
 from conduit.sessions import SQLiteSessionService
 from conduit.websocket_chat import WebSocketChatManager
@@ -41,6 +43,7 @@ class FakeRuntime:
         self.tool_response = tool_response
         self.iter_event_calls = 0
         self.received_state_deltas: list[dict[str, object] | None] = []
+        self._session_events: dict[str, list[Event]] = {}
 
     async def create_session(self, session_id: str | None = None):
         return await self.session_service.create_session(
@@ -70,6 +73,9 @@ class FakeRuntime:
             return "ask"
         return "allow"
 
+    async def get_session_context_estimate(self, session_id: str):
+        return estimate_events_context(self._session_events.get(session_id, []))
+
     async def iter_events(
         self,
         *,
@@ -78,9 +84,16 @@ class FakeRuntime:
         invocation_id: str | None,
         state_delta=None,
     ):
-        del session
         del invocation_id
         self.iter_event_calls += 1
+        session_events = self._session_events.setdefault(session.id, [])
+        session_events.append(
+            Event(
+                invocation_id="inv-test-user",
+                author="user",
+                content=new_message,
+            )
+        )
         self.received_state_deltas.append(
             dict(state_delta) if state_delta is not None else None
         )
@@ -90,16 +103,20 @@ class FakeRuntime:
                 new_message.parts[0].function_response.response.get("confirmed")
             )
             if confirmed and self.require_approval:
-                yield _tool_result_event(
+                event = _tool_result_event(
                     tool_call_id="tc_1",
                     tool_name="web_fetch",
                     response={"ok": True},
                 )
-            yield _text_event("Approved result." if confirmed else "Denied result.")
+                session_events.append(event)
+                yield event
+            event = _text_event("Approved result." if confirmed else "Denied result.")
+            session_events.append(event)
+            yield event
             return
 
         message = new_message.parts[0].text or ""
-        yield _tool_call_event(
+        event = _tool_call_event(
             tool_call_id="tc_1",
             tool_name="web_fetch" if self.require_approval else self.tool_name,
             args={
@@ -108,26 +125,38 @@ class FakeRuntime:
                 else message,
             },
         )
+        session_events.append(event)
+        yield event
         if self.require_approval:
-            yield _approval_required_event()
+            event = _approval_required_event()
+            session_events.append(event)
+            yield event
             return
         if self.tool_error:
-            yield _tool_result_event(
+            event = _tool_result_event(
                 tool_call_id="tc_1",
                 tool_name=self.tool_name,
                 response={"ok": False, "error": self.tool_error},
             )
+            session_events.append(event)
+            yield event
         elif self.tool_response is not None:
-            yield _tool_result_event(
+            event = _tool_result_event(
                 tool_call_id="tc_1",
                 tool_name=self.tool_name,
                 response=self.tool_response,
             )
+            session_events.append(event)
+            yield event
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
         if self.thought_trace:
-            yield _thought_event(self.thought_trace)
-        yield _text_event(self.reply)
+            event = _thought_event(self.thought_trace)
+            session_events.append(event)
+            yield event
+        event = _text_event(self.reply)
+        session_events.append(event)
+        yield event
 
 
 def test_websocket_turn_streams_ack_tool_calls_tokens_and_done(tmp_path):
@@ -161,6 +190,7 @@ def test_websocket_turn_streams_ack_tool_calls_tokens_and_done(tmp_path):
         event["content"] for event in events if event["type"] == "token"
     ) == reply
     assert events[-1]["type"] == "done"
+    assert events[-1]["context_estimate"]["chars"] > 0
     assert runtime.iter_event_calls == 1
 
 
@@ -220,6 +250,10 @@ def test_websocket_turn_streams_failed_tool_result_and_done(tmp_path):
     assert tool_result_events[0]["tool_call_id"] == "tc_1"
     assert tool_result_events[0]["status"] == "failed"
     assert tool_result_events[0]["error"] == "HTTP 403 Forbidden"
+    assert tool_result_events[0]["context_chars_delta"] == estimate_tool_result_chars(
+        "web_search",
+        {"ok": False, "error": "HTTP 403 Forbidden"},
+    )
     assert events[-1]["type"] == "done"
     assert runtime.iter_event_calls == 1
 
@@ -257,6 +291,17 @@ def test_websocket_turn_streams_bash_tool_result_response(tmp_path):
     assert tool_result_events[0]["tool"] == "bash"
     assert tool_result_events[0]["response"]["stdout"] == "hello"
     assert tool_result_events[0]["response"]["exit_code"] == 0
+    assert tool_result_events[0]["context_chars_delta"] == estimate_tool_result_chars(
+        "bash",
+        {
+            "ok": True,
+            "stdout": "hello",
+            "stderr": "",
+            "exit_code": 0,
+            "timed_out": False,
+            "duration_seconds": 0.01,
+        },
+    )
     assert events[-1]["type"] == "done"
     assert runtime.iter_event_calls == 1
 
@@ -386,6 +431,7 @@ def test_websocket_approval_required_and_resume(tmp_path):
         event["content"] for event in resumed_events if event["type"] == "token"
     ) == "Approved result."
     assert resumed_events[-1]["type"] == "done"
+    assert resumed_events[-1]["context_estimate"]["chars"] > 0
     assert runtime.iter_event_calls == 2
 
 

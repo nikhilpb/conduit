@@ -8,6 +8,7 @@ from google.genai import types
 
 from conduit.agent import build_root_agent
 from conduit.config import Settings
+from conduit.context_estimate import build_context_estimate
 from conduit.main import _build_transcript
 from conduit.main import create_app
 from conduit.runtime import TurnResult
@@ -38,6 +39,7 @@ def test_health_reports_runtime_configuration(monkeypatch, tmp_path):
     assert response.json()["model_label"] == "Claude Sonnet 4.6"
     assert response.json()["provider"] == "anthropic"
     assert response.json()["provider_api_key_configured"] is False
+    assert response.json()["context_chars_per_token"] == 4.0
 
 
 def test_create_and_list_sessions(tmp_path):
@@ -66,6 +68,11 @@ def test_create_and_list_sessions(tmp_path):
     assert detail_response.json() == {
         "session_id": session_id,
         "messages": [],
+        "context_estimate": {
+            "chars": 0,
+            "tokens": 0,
+            "chars_per_token": 4.0,
+        },
     }
 
 
@@ -182,6 +189,7 @@ def test_chat_passes_turn_context_into_runtime_state(tmp_path):
             session_id=session_id or "session-1",
             reply="ok",
             tool_calls=[],
+            context_estimate=build_context_estimate(42),
         )
 
     app.state.runtime.run_turn = fake_run_turn  # type: ignore[method-assign]
@@ -211,6 +219,11 @@ def test_chat_passes_turn_context_into_runtime_state(tmp_path):
         },
     }
     assert response.json()["reply"] == "ok"
+    assert response.json()["context_estimate"] == {
+        "chars": 42,
+        "tokens": 11,
+        "chars_per_token": 4.0,
+    }
 
 
 def test_build_transcript_includes_thinking_trace():

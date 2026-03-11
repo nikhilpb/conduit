@@ -141,19 +141,44 @@ Uri webSocketUriForBaseUrl(String baseUrl, [String path = '/chat']) {
 class ConduitChatSocket {
   ConduitChatSocket._(WebSocketChannel channel)
     : _channel = channel,
+      _sendOverride = null,
+      _disposeOverride = null,
       events = channel.stream
           .map((message) => _decodeSocketMessage(message))
           .asBroadcastStream();
 
-  final WebSocketChannel _channel;
+  ConduitChatSocket.test({
+    required Stream<ChatServerEvent> events,
+    Future<void> Function(Map<String, dynamic> payload)? onSend,
+    Future<void> Function()? onDispose,
+  }) : _channel = null,
+       _sendOverride = onSend,
+       _disposeOverride = onDispose,
+       events = events.asBroadcastStream();
+
+  final WebSocketChannel? _channel;
+  final Future<void> Function(Map<String, dynamic> payload)? _sendOverride;
+  final Future<void> Function()? _disposeOverride;
   final Stream<ChatServerEvent> events;
 
   Future<void> send(Map<String, dynamic> payload) async {
-    _channel.sink.add(jsonEncode(payload));
+    if (_channel != null) {
+      _channel.sink.add(jsonEncode(payload));
+      return;
+    }
+    if (_sendOverride != null) {
+      await _sendOverride(payload);
+    }
   }
 
   Future<void> dispose() async {
-    await _channel.sink.close();
+    if (_channel != null) {
+      await _channel.sink.close();
+      return;
+    }
+    if (_disposeOverride != null) {
+      await _disposeOverride();
+    }
   }
 }
 
