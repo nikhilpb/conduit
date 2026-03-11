@@ -9,7 +9,7 @@ Android (Flutter)  ──WebSocket──▶  FastAPI :18423  ──▶  Google A
                                         │                     │
                                         ▼                     ▼
                                    SQLite DB           LLM APIs (Claude,
-                                                       Gemini, GPT)
+                                                       Gemini)
 ```
 
 ## Architecture
