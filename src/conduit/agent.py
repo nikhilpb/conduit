@@ -9,7 +9,9 @@ from google.adk.tools.tool_context import ToolContext
 from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
 from conduit.config import Settings
 from conduit.model_registry import infer_provider
+from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_permissions import permission_summary
+from conduit.tools.bash import build_bash_tool
 from conduit.tools.polymarket import build_polymarket_tools
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
@@ -21,6 +23,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
 
     web_search = build_web_search_tool(settings)
     web_fetch = build_web_fetch_tool(settings)
+    bash = build_bash_tool(settings)
     polymarket_tools = build_polymarket_tools(settings)
     provider = infer_provider(model_name)
     model = model_name
@@ -37,12 +40,15 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
         model=model,
         description=(
             "A personal assistant that can search the web, fetch webpages, "
-            "and inspect Polymarket prediction markets."
+            "run Bash commands on the host, and inspect Polymarket prediction markets."
         ),
         instruction=(
             "You are Conduit, a research assistant. "
             "Use web_search when you need to discover fresh information. "
             "Use web_fetch when you need to inspect a specific page or URL in detail. "
+            "Use bash when you need to inspect or operate on the local host computer. "
+            "The bash tool can execute arbitrary host commands and every bash call "
+            "requires explicit user confirmation before it runs. "
             "If a tool reports an error, treat it as a failed attempt and keep working when useful. "
             "Use polymarket_search_markets or polymarket_list_markets to find "
             "prediction markets on Polymarket. "
@@ -60,6 +66,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
         tools=[
             web_search,
             web_fetch,
+            bash,
             *polymarket_tools,
         ],
     )
@@ -85,7 +92,10 @@ def _build_before_tool_callback(settings: Settings):
         args: dict,
         tool_context: ToolContext,
     ) -> dict | None:
-        mode = settings.tool_permissions.get(tool.name, "allow")
+        mode = effective_tool_permission(
+            tool.name,
+            permissions=settings.tool_permissions,
+        )
         if mode == "allow":
             return None
 

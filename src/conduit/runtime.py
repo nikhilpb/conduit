@@ -24,6 +24,7 @@ from conduit.model_registry import ModelRegistry
 from conduit.model_registry import persist_model_registry
 from conduit.model_registry import load_model_registry
 from conduit.sessions import SQLiteSessionService
+from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_call_utils import tool_response_status
 
 
@@ -138,7 +139,10 @@ class ConduitRuntime:
     def tool_permission_mode(self, tool_name: str) -> str:
         """Return the configured permission mode for a tool."""
 
-        return self.settings.tool_permissions.get(tool_name, "allow")
+        return effective_tool_permission(
+            tool_name,
+            permissions=self.settings.tool_permissions,
+        )
 
     async def iter_events(
         self,
