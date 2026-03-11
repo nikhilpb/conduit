@@ -12,7 +12,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 
 - Single-user private assistant for a Tailscale-only deployment.
 - Backend: Python, FastAPI, Google ADK `1.26.0`, SQLite persistence, `uv` for package/runtime management.
-- Client: Flutter Android thin client in `client/think_client/`.
+- Client: Flutter Android thin client in `flutter/`.
 - Deployment: Docker Compose on port `18423`.
 
 ## Current Product Shape
@@ -80,16 +80,16 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 
 ## Client Structure
 
-- `client/think_client/lib/main.dart`
+- `flutter/lib/main.dart`
   - Main app, session list, chat screen, settings screen, most UI logic.
-- `client/think_client/lib/conduit_api.dart`
+- `flutter/lib/conduit_api.dart`
   - HTTP client and websocket transport.
-- `client/think_client/lib/models.dart`
+- `flutter/lib/models.dart`
   - DTOs for health, sessions, transcript, websocket events, model settings.
-- `client/think_client/lib/context_estimate.dart`
-  - Client-side helpers for hidden-context estimation, tool-call char counting, and composer usage-bar formatting.
-- `client/think_client/lib/settings_store.dart`
+- `flutter/lib/settings_store.dart`
   - Local persistence for server URL, location, personal instructions.
+- `flutter/lib/context_estimate.dart`
+  - Client-side helpers for hidden-context estimation, tool-call char counting, and composer usage-bar formatting.
 
 ## Implemented UX/Protocol Decisions
 

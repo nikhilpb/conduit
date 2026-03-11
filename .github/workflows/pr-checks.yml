@@ -47,7 +47,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: client/think_client
+        working-directory: flutter
 
     steps:
       - name: Check out repository
