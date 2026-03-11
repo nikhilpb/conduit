@@ -202,7 +202,10 @@ async def _run(
     env: dict[str, str] | None = None,
     timeout: float = 60,
 ) -> tuple[int, str, str]:
-    """Run a subprocess and return (returncode, stdout, stderr)."""
+    """Run a subprocess and return (returncode, stdout, stderr).
+
+    On timeout the child process tree is killed before re-raising.
+    """
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -211,7 +214,15 @@ async def _run(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except (asyncio.TimeoutError, TimeoutError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        await proc.wait()
+        raise
     return proc.returncode, stdout.decode(), stderr.decode()
 
 
