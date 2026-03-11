@@ -6,7 +6,6 @@ import asyncio
 import os
 import re
 import shutil
-import tempfile
 import uuid
 from typing import Any
 
@@ -83,6 +82,12 @@ def build_codex_tool(settings: Settings):
             if rc != 0:
                 return {"ok": False, "error": f"Failed to create branch: {stderr.strip()}"}
 
+            # --- snapshot HEAD before codex ---
+            _, head_before, _ = await _run(
+                ["git", "rev-parse", "HEAD"], cwd=work_dir,
+            )
+            head_before = head_before.strip()
+
             # --- run codex ---
             codex_env = {**os.environ, "OPENAI_API_KEY": api_key}
             try:
@@ -101,26 +106,31 @@ def build_codex_tool(settings: Settings):
             if rc != 0:
                 return {"ok": False, "error": f"Codex failed: {stderr.strip()}"}
 
-            # --- check for changes ---
-            rc, diff_out, _ = await _run(["git", "diff", "--stat"], cwd=work_dir)
-            rc_staged, staged_out, _ = await _run(
-                ["git", "diff", "--staged", "--stat"], cwd=work_dir
+            # --- detect changes (committed or uncommitted) ---
+            _, head_after, _ = await _run(
+                ["git", "rev-parse", "HEAD"], cwd=work_dir,
             )
-            rc_untracked, untracked_out, _ = await _run(
-                ["git", "status", "--porcelain"], cwd=work_dir
+            head_after = head_after.strip()
+            codex_committed = head_after != head_before
+
+            _, status_out, _ = await _run(
+                ["git", "status", "--porcelain"], cwd=work_dir,
             )
-            if not diff_out.strip() and not staged_out.strip() and not untracked_out.strip():
+            has_uncommitted = bool(status_out.strip())
+
+            if not codex_committed and not has_uncommitted:
                 return {"ok": False, "error": "Codex made no changes to the repository"}
 
-            # --- commit ---
-            await _run(["git", "add", "-A"], cwd=work_dir)
-            commit_msg = prompt if len(prompt) <= 72 else prompt[:69] + "..."
-            rc, _stdout, stderr = await _run(
-                ["git", "commit", "-m", commit_msg],
-                cwd=work_dir,
-            )
-            if rc != 0:
-                return {"ok": False, "error": f"Failed to commit: {stderr.strip()}"}
+            # --- commit any uncommitted changes ---
+            if has_uncommitted:
+                await _run(["git", "add", "-A"], cwd=work_dir)
+                commit_msg = prompt if len(prompt) <= 72 else prompt[:69] + "..."
+                rc, _stdout, stderr = await _run(
+                    ["git", "commit", "-m", commit_msg],
+                    cwd=work_dir,
+                )
+                if rc != 0:
+                    return {"ok": False, "error": f"Failed to commit: {stderr.strip()}"}
 
             # --- push ---
             rc, _stdout, stderr = await _run(
@@ -160,6 +170,9 @@ def build_codex_tool(settings: Settings):
                 "pr_url": pr_url,
                 "message": message,
             }
+
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "Operation timed out"}
 
         finally:
             # Clean up the temp clone
