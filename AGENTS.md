@@ -117,7 +117,6 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - tool permissions: `config/tools.yaml`
 - Default backend bind: `0.0.0.0:18423`
 - Docker Compose mounts `./data` and `./config` into the container and publishes `18423`.
-- Docker Compose also mounts `${CONDUIT_EXTERNAL_SKILLS_DIR:-/Users/nikhilbhat/git/skills}` at `/app/external-skills` so external recipe catalogs can be exposed to the server.
 
 ## ADK Web
 
