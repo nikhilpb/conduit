@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_prefix="CONDUIT_",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = "conduit"

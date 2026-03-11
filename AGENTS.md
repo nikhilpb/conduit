@@ -2,6 +2,8 @@
 
 [VERY IMPORTANT] For each new commit reflect on whether `AGENTS.md` can be updated for future agent sessions. Only important changes should go in the file.
 
+[VERY IMPORTANT] After completing work in a git worktree, always commit the changes and open a pull request unless the user explicitly asks not to.
+
 Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhilbhat/git/conduit/DESIGN.md) includes broader future intent and may be ahead of the code.
 
 ## Repo Snapshot
@@ -115,6 +117,9 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `uv run conduit-api`
 - Backend tests:
   - `uv run pytest`
+- GitHub PR checks:
+  - backend: `uv sync --locked --dev`, `uv run pytest`, `docker build .`
+  - client: `flutter pub get`, `flutter analyze`, `flutter test`, `flutter build apk --debug`
 - ADK Web:
   - `uv run adk web adk_agents --host 127.0.0.1 --port 4201`
 - Flutter checks:
