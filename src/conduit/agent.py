@@ -9,8 +9,10 @@ from google.adk.tools.tool_context import ToolContext
 from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
 from conduit.config import Settings
 from conduit.model_registry import infer_provider
+from conduit.repos import load_repos
 from conduit.tool_permissions import permission_summary
 from conduit.tools.google_workspace import build_google_workspace_tools
+from conduit.tools.codex import build_codex_tool
 from conduit.tools.polymarket import build_polymarket_tools
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
@@ -24,6 +26,9 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
     web_fetch = build_web_fetch_tool(settings)
     polymarket_tools = build_polymarket_tools(settings)
     google_workspace_tools = build_google_workspace_tools(settings)
+    codex_task = build_codex_tool(settings)
+    repos = load_repos(settings.repos_config_path)
+    repo_keys = ", ".join(sorted(repos)) if repos else "(none configured)"
     provider = infer_provider(model_name)
     model = model_name
     if provider == "anthropic":
@@ -39,8 +44,9 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
         model=model,
         description=(
             "A personal assistant that can search the web, fetch webpages, "
-            "inspect Polymarket prediction markets, and work with Gmail, "
-            "Google Calendar, Drive, and Docs when enabled by server policy."
+            "inspect Polymarket prediction markets, work with Gmail, "
+            "Google Calendar, Drive, and Docs when enabled by server policy, "
+            "and run Codex to implement code changes."
         ),
         instruction=(
             "You are Conduit, a research assistant. "
@@ -63,6 +69,10 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
             "to win or happen, such as an election outcome or a geopolitical event, "
             "check Polymarket first when it is relevant. "
             "The Polymarket tools are read-only and only expose public market data. "
+            "Use codex_task when the user asks to use Codex to implement, fix, or "
+            "change something in a code repository. Available repositories: "
+            f"{repo_keys}. Extract the implementation task from the user's request "
+            "and pass it as the prompt. "
             "Prefer citing concrete facts from fetched pages when possible. "
             "If you are uncertain, say so directly."
         ),
@@ -73,6 +83,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
             web_fetch,
             *google_workspace_tools,
             *polymarket_tools,
+            codex_task,
         ],
     )
 

@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     gws_account: str | None = None
     gws_timeout_seconds: float = 30.0
     gws_max_content_chars: int = 12_000
+    codex_timeout_seconds: float = 300.0
+    codex_work_dir: str = "/tmp/conduit-codex"
+    repos_config_path: str = "config/repos.yaml"
     google_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
@@ -60,6 +63,11 @@ class Settings(BaseSettings):
     brave_api_key: str | None = Field(
         default=None,
         validation_alias="BRAVE_API_KEY",
+        repr=False,
+    )
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_API_KEY",
         repr=False,
     )
 

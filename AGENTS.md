@@ -25,6 +25,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
     - `drive_search_files`
     - `docs_get_document` / `docs_create_document` / `docs_append_text` / `docs_replace_text`
   - `polymarket_search_markets` / `polymarket_list_markets` / `polymarket_get_market` / `polymarket_get_price_history`: public Polymarket market lookup, current pricing, price history, liquidity, and volume snapshots.
+  - `codex_task`: spawns a headless OpenAI Codex CLI agent to clone a configured repo, implement changes, commit, push, and open a PR. Configured repos live in `config/repos.yaml`. Permission mode is `ask` (requires user confirmation).
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Supported base models:
@@ -72,6 +73,10 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Normalizes CLI JSON into Conduit-owned tool outputs and structured errors.
 - `src/conduit/tools/polymarket.py`
   - Public Polymarket Gamma/CLOB API integration for market lookup and pricing history.
+- `src/conduit/tools/codex.py`
+  - Codex CLI tool: clone repo, run codex, commit, push, open PR.
+- `src/conduit/repos.py`
+  - Loads repo configuration from `config/repos.yaml`.
 
 ## Client Structure
 
@@ -108,11 +113,13 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `ANTHROPIC_API_KEY`
   - `GOOGLE_API_KEY` or `GEMINI_API_KEY`
   - `BRAVE_API_KEY`
+  - `OPENAI_API_KEY`
 - Important paths:
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`
   - tool permissions: `config/tools.yaml`
   - Workspace credentials (Docker bind mount): `secrets/gws-credentials.json` -> `/app/secrets/gws-credentials.json`
+  - repo config: `config/repos.yaml`
 - Default backend bind: `0.0.0.0:18423`
 - Docker Compose mounts `./data`, `./config`, and read-only `./secrets` into the container and publishes `18423`.
 - Docker image installs pinned `gws` binary release `0.11.1` into `/usr/local/bin/gws`.
