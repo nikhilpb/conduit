@@ -1145,6 +1145,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final visibleMessages = _messages
+        .where(
+          (message) =>
+              message.hasVisibleContent || _isAssistantMessagePending(message),
+        )
+        .toList(growable: false);
+
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 20,
@@ -1187,7 +1194,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                     itemBuilder: (context, index) {
-                      final message = _messages[index];
+                      final message = visibleMessages[index];
                       return MessageBubble(
                         message: message,
                         isPending: _isAssistantMessagePending(message),
@@ -1195,7 +1202,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                     separatorBuilder: (context, index) =>
                         const SizedBox(height: 10),
-                    itemCount: _messages.length,
+                    itemCount: visibleMessages.length,
                   ),
           ),
           SafeArea(
@@ -2445,65 +2452,7 @@ String? _toolCallDetail(ToolCall toolCall) {
   if (toolCall.name != 'bash') {
     return null;
   }
-
-  final sections = <String>[];
-  final meta = <String>[];
-  final command = (toolCall.args['command'] as String?)?.trim();
-  if (command != null && command.isNotEmpty) {
-    sections.add('command\n$command');
-  }
-
-  final response = toolCall.response;
-  if (response == null || response.isEmpty) {
-    return sections.isNotEmpty ? sections.join('\n\n') : toolCall.error;
-  }
-
-  final exitCode = response['exit_code'];
-  if (exitCode != null) {
-    meta.add('exit $exitCode');
-  }
-  if (response['timed_out'] == true) {
-    meta.add('timed out');
-  }
-  final duration = response['duration_seconds'];
-  if (duration is num) {
-    meta.add('${duration.toStringAsFixed(3)}s');
-  }
-  final workingDirectory = (response['working_directory'] as String?)?.trim();
-  if (workingDirectory != null && workingDirectory.isNotEmpty) {
-    meta.add('cwd ${_ellipsize(workingDirectory, 42)}');
-  }
-  if (meta.isNotEmpty) {
-    sections.add(meta.join(' • '));
-  }
-
-  final stdout = (response['stdout'] as String?) ?? '';
-  if (stdout.isNotEmpty) {
-    var stdoutSection = 'stdout\n$stdout';
-    if (response['stdout_truncated'] == true) {
-      stdoutSection = '$stdoutSection\n[truncated]';
-    }
-    sections.add(stdoutSection);
-  }
-
-  final stderr = (response['stderr'] as String?) ?? '';
-  if (stderr.isNotEmpty) {
-    var stderrSection = 'stderr\n$stderr';
-    if (response['stderr_truncated'] == true) {
-      stderrSection = '$stderrSection\n[truncated]';
-    }
-    sections.add(stderrSection);
-  }
-
-  final error = (response['error'] as String?)?.trim();
-  if (error != null && error.isNotEmpty && stderr.isEmpty) {
-    sections.add('error\n$error');
-  }
-
-  if (sections.isEmpty) {
-    return 'No stdout or stderr.';
-  }
-  return sections.join('\n\n');
+  return null;
 }
 
 String _shortenUrl(String url) {

@@ -4,6 +4,8 @@
 
 [VERY IMPORTANT] After completing work in a git worktree, always commit the changes and open a pull request unless the user explicitly asks not to.
 
+[VERY IMPORTANT] Always show proof of work using screenshots in the final response when the completed work can be exercised visually. Prefer emulator/device screenshots for client changes and capture the most relevant visible evidence for other user-facing behavior.
+
 Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhilbhat/git/conduit/DESIGN.md) includes broader future intent and may be ahead of the code.
 
 ## Repo Snapshot
@@ -91,10 +93,10 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.
 - Tool calls get explicit UI treatment; approval requests are surfaced inline.
-- The Flutter client hides internal `adk_request_confirmation` tool-call transcript items; approvals only appear through the dedicated approval UI.
+- The Flutter client hides internal `adk_request_confirmation` transcript items entirely once their hidden tool calls are stripped; approvals only appear through the dedicated approval UI.
 - Standalone tool-call transcript items render as chips without an enclosing chat bubble; `bash` chips are labeled as `Bash(<truncated command>)`.
 - Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
-- `bash` tool results now preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, and the Flutter client renders those details inline for completed bash calls.
+- `bash` tool results now preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, but the Flutter client no longer renders inline bash output; it keeps a single bash invocation chip in history and in live turns.
 - The websocket/interactive chat runner exposes `bash`; the plain HTTP `/chat` runner intentionally excludes `bash` because that surface cannot complete approval handshakes.
 - Chat composer shows the currently active model label.
 - Current server URL comes from `--dart-define=CONDUIT_SERVER_URL=...` on first launch, but user settings can override later.

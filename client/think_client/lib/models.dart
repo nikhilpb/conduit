@@ -53,6 +53,13 @@ bool isVisibleToolCallName(String? name) {
   return name != null && !_hiddenToolCallNames.contains(name);
 }
 
+List<ToolCall> _parseRenderableToolCalls(List<dynamic>? rawToolCalls) {
+  return (rawToolCalls ?? const [])
+      .map((item) => ToolCall.fromJson(item as Map<String, dynamic>))
+      .where((toolCall) => toolCall.shouldRender)
+      .toList();
+}
+
 class ToolCall {
   const ToolCall({
     this.toolCallId,
@@ -85,6 +92,9 @@ class ToolCall {
 
   bool get isFailed => status == 'failed';
   bool get isVisible => isVisibleToolCallName(name);
+  bool get isResultOnlyBashEntry =>
+      name == 'bash' && args.isEmpty && (response?.isNotEmpty ?? false);
+  bool get shouldRender => isVisible && !isResultOnlyBashEntry;
 
   Map<String, dynamic> toJson() => {
     'tool_call_id': toolCallId,
@@ -113,10 +123,9 @@ class TranscriptMessage {
       text: json['text'] as String? ?? '',
       createdAt: (json['created_at'] as num?)?.toDouble() ?? 0,
       thinkingTrace: json['thinking_trace'] as String? ?? '',
-      toolCalls: (json['tool_calls'] as List<dynamic>? ?? const [])
-          .map((item) => ToolCall.fromJson(item as Map<String, dynamic>))
-          .where((toolCall) => toolCall.isVisible)
-          .toList(),
+      toolCalls: _parseRenderableToolCalls(
+        json['tool_calls'] as List<dynamic>?,
+      ),
     );
   }
 
@@ -128,6 +137,10 @@ class TranscriptMessage {
   final List<ToolCall> toolCalls;
 
   bool get isUser => role == 'user';
+  bool get hasVisibleContent =>
+      text.trim().isNotEmpty ||
+      thinkingTrace.trim().isNotEmpty ||
+      toolCalls.isNotEmpty;
 
   TranscriptMessage copyWith({
     String? messageId,
@@ -152,13 +165,13 @@ class SessionDetail {
   const SessionDetail({required this.sessionId, required this.messages});
 
   factory SessionDetail.fromJson(Map<String, dynamic> json) {
+    final messages = (json['messages'] as List<dynamic>? ?? const [])
+        .map((item) => TranscriptMessage.fromJson(item as Map<String, dynamic>))
+        .where((message) => message.hasVisibleContent)
+        .toList();
     return SessionDetail(
       sessionId: json['session_id'] as String,
-      messages: (json['messages'] as List<dynamic>? ?? const [])
-          .map(
-            (item) => TranscriptMessage.fromJson(item as Map<String, dynamic>),
-          )
-          .toList(),
+      messages: messages,
     );
   }
 
@@ -177,10 +190,9 @@ class ChatReply {
     return ChatReply(
       sessionId: json['session_id'] as String,
       reply: json['reply'] as String? ?? '',
-      toolCalls: (json['tool_calls'] as List<dynamic>? ?? const [])
-          .map((item) => ToolCall.fromJson(item as Map<String, dynamic>))
-          .where((toolCall) => toolCall.isVisible)
-          .toList(),
+      toolCalls: _parseRenderableToolCalls(
+        json['tool_calls'] as List<dynamic>?,
+      ),
     );
   }
 
