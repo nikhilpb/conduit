@@ -4,6 +4,8 @@
 
 [VERY IMPORTANT] After completing work in a git worktree, always commit the changes and open a pull request unless the user explicitly asks not to.
 
+[VERY IMPORTANT] Always show proof of work using screenshots in the final response when the completed work can be exercised visually. Prefer emulator/device screenshots for client changes and capture the most relevant visible evidence for other user-facing behavior.
+
 Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhilbhat/git/conduit/DESIGN.md) includes broader future intent and may be ahead of the code.
 
 ## Repo Snapshot
