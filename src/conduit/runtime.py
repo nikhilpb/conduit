@@ -153,10 +153,12 @@ class ConduitRuntime:
         new_message: types.Content,
         invocation_id: str | None = None,
         state_delta: dict[str, Any] | None = None,
+        runner: Runner | None = None,
     ) -> AsyncIterator[Event]:
         """Yield raw ADK events for a session invocation."""
 
-        async for event in self.runner.run_async(
+        active_runner = runner or self.runner
+        async for event in active_runner.run_async(
             user_id=self.settings.internal_user_id,
             session_id=session.id,
             invocation_id=invocation_id,
@@ -171,6 +173,7 @@ class ConduitRuntime:
         session: Session,
         message: str,
         state_delta: dict[str, Any] | None = None,
+        runner: Runner | None = None,
     ) -> AsyncIterator[RuntimeTurnUpdate]:
         """Yield structured updates for a single turn."""
 
@@ -183,6 +186,7 @@ class ConduitRuntime:
             session=session,
             new_message=types.UserContent(parts=[types.Part(text=message)]),
             state_delta=state_delta,
+            runner=runner,
         ):
             if event.author == "user":
                 continue
@@ -257,6 +261,7 @@ class ConduitRuntime:
             session=session,
             message=message,
             state_delta=state_delta,
+            runner=self.http_runner,
         ):
             if update.kind == "tool_call":
                 tool_call = {
@@ -313,6 +318,19 @@ class ConduitRuntime:
         )
         self.runner = Runner(
             app=self.app,
+            session_service=self.session_service,
+        )
+        self.http_app = App(
+            name=self.settings.app_name,
+            root_agent=build_root_agent(
+                self.settings,
+                model_name=registry.active.model,
+                enable_bash=False,
+            ),
+            resumability_config=ResumabilityConfig(is_resumable=True),
+        )
+        self.http_runner = Runner(
+            app=self.http_app,
             session_service=self.session_service,
         )
 

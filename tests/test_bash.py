@@ -76,3 +76,20 @@ async def test_bash_tool_returns_error_for_invalid_working_directory(tmp_path):
     assert result["ok"] is False
     assert result["exit_code"] is None
     assert result["error"] == f"working_directory does not exist: {tmp_path / 'missing'}"
+
+
+@pytest.mark.anyio
+async def test_bash_tool_truncates_large_stdout_without_failing():
+    tool = bash_module.build_bash_tool(
+        Settings(
+            _env_file=None,
+            bash_timeout_seconds=5.0,
+            bash_max_output_chars=5,
+        )
+    )
+
+    result = await tool("printf 'abcdefghij'")
+
+    assert result["ok"] is True
+    assert result["stdout"] == "abcde"
+    assert result["stdout_truncated"] is True

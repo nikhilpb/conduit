@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 from pathlib import Path
 from time import monotonic
 from typing import Any
 
 from conduit.config import Settings
+
+_READ_CHUNK_SIZE = 4096
 
 
 def build_bash_tool(settings: Settings):
@@ -83,24 +86,30 @@ def build_bash_tool(settings: Settings):
             )
 
         timed_out = False
+        stdout_task = asyncio.create_task(
+            _capture_stream(
+                process.stdout,
+                max_chars=settings.bash_max_output_chars,
+            )
+        )
+        stderr_task = asyncio.create_task(
+            _capture_stream(
+                process.stderr,
+                max_chars=settings.bash_max_output_chars,
+            )
+        )
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(),
+            await asyncio.wait_for(
+                process.wait(),
                 timeout=effective_timeout,
             )
         except asyncio.TimeoutError:
             timed_out = True
             process.kill()
-            stdout_bytes, stderr_bytes = await process.communicate()
+            await process.wait()
 
-        stdout, stdout_truncated = _decode_output(
-            stdout_bytes,
-            max_chars=settings.bash_max_output_chars,
-        )
-        stderr, stderr_truncated = _decode_output(
-            stderr_bytes,
-            max_chars=settings.bash_max_output_chars,
-        )
+        stdout, stdout_truncated = await stdout_task
+        stderr, stderr_truncated = await stderr_task
         duration_seconds = round(monotonic() - started_at, 3)
 
         error: str | None = None
@@ -160,15 +169,60 @@ def _resolve_timeout(
     return min(requested_timeout, max_timeout), None
 
 
-def _decode_output(
-    output: bytes | None,
+async def _capture_stream(
+    stream: asyncio.StreamReader | None,
     *,
     max_chars: int,
 ) -> tuple[str, bool]:
-    text = (output or b"").decode("utf-8", errors="replace")
-    if len(text) <= max_chars:
-        return text, False
-    return text[:max_chars], True
+    if stream is None:
+        return "", False
+
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    parts: list[str] = []
+    captured_chars = 0
+    truncated = False
+
+    while True:
+        chunk = await stream.read(_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        text = decoder.decode(chunk)
+        captured_chars, truncated = _append_capped_text(
+            parts,
+            text,
+            captured_chars=captured_chars,
+            max_chars=max_chars,
+            truncated=truncated,
+        )
+
+    tail = decoder.decode(b"", final=True)
+    captured_chars, truncated = _append_capped_text(
+        parts,
+        tail,
+        captured_chars=captured_chars,
+        max_chars=max_chars,
+        truncated=truncated,
+    )
+    return "".join(parts), truncated
+
+
+def _append_capped_text(
+    parts: list[str],
+    text: str,
+    *,
+    captured_chars: int,
+    max_chars: int,
+    truncated: bool,
+) -> tuple[int, bool]:
+    if not text:
+        return captured_chars, truncated
+
+    remaining = max(max_chars - captured_chars, 0)
+    if remaining > 0:
+        parts.append(text[:remaining])
+    if len(text) > remaining:
+        truncated = True
+    return captured_chars + len(text), truncated
 
 
 def _error_result(

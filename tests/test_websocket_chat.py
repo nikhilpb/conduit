@@ -379,6 +379,7 @@ def test_websocket_approval_required_and_resume(tmp_path):
         "approval_required",
     ]
     assert approval_event["tool"] == "web_fetch"
+    assert approval_event["args"] == {"url": "https://example.com"}
     assert approval_event["tool_call_id"] == "tc_1"
     assert any(event["type"] == "tool_result" for event in resumed_events)
     assert "".join(

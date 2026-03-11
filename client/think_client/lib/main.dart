@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -876,6 +877,7 @@ class _ChatScreenState extends State<ChatScreen> {
       approvalId: approvalId,
       turnId: turnId,
       tool: event.tool ?? 'tool',
+      args: event.args,
       summary: event.summary ?? 'Approve this tool call?',
     );
     if (_pendingApproval?.approvalId == nextApproval.approvalId) {
@@ -2006,6 +2008,9 @@ class _ApprovalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final detailLabel = _approvalDetailLabel(request);
+    final detailText = _approvalDetailText(request);
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -2033,6 +2038,35 @@ class _ApprovalCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(request.summary),
+            if (detailText != null) ...[
+              const SizedBox(height: 14),
+              Text(
+                detailLabel,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: const Color(0xFF7B4B2A),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 220),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8F3EB),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE6DDCF)),
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    detailText,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontFamily: 'monospace',
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [
@@ -2391,13 +2425,17 @@ String? _toolCallDetail(ToolCall toolCall) {
     return null;
   }
 
-  final response = toolCall.response;
-  if (response == null || response.isEmpty) {
-    return toolCall.error;
-  }
-
   final sections = <String>[];
   final meta = <String>[];
+  final command = (toolCall.args['command'] as String?)?.trim();
+  if (command != null && command.isNotEmpty) {
+    sections.add('command\n$command');
+  }
+
+  final response = toolCall.response;
+  if (response == null || response.isEmpty) {
+    return sections.isNotEmpty ? sections.join('\n\n') : toolCall.error;
+  }
 
   final exitCode = response['exit_code'];
   if (exitCode != null) {
@@ -2570,13 +2608,35 @@ class _PendingApprovalRequest {
     required this.approvalId,
     required this.turnId,
     required this.tool,
+    required this.args,
     required this.summary,
   });
 
   final String approvalId;
   final String turnId;
   final String tool;
+  final Map<String, dynamic> args;
   final String summary;
+}
+
+String _approvalDetailLabel(_PendingApprovalRequest request) {
+  if (request.tool == 'bash') {
+    return 'Full command';
+  }
+  return 'Arguments';
+}
+
+String? _approvalDetailText(_PendingApprovalRequest request) {
+  if (request.args.isEmpty) {
+    return null;
+  }
+  if (request.tool == 'bash') {
+    final command = (request.args['command'] as String?)?.trim();
+    if (command != null && command.isNotEmpty) {
+      return command;
+    }
+  }
+  return const JsonEncoder.withIndent('  ').convert(request.args);
 }
 
 String _makeClientMessageId() {

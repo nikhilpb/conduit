@@ -555,6 +555,7 @@ def _extract_approval_required_event(
             "approval_id": function_call.id or "",
             "tool_call_id": original_function_call.get("id") or "",
             "tool": tool_name,
+            "args": tool_args,
             "summary": payload.get("summary")
             or tool_confirmation.get("hint")
             or permission_summary(tool_name, tool_args),
