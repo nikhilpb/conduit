@@ -7,6 +7,22 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic import Field
 
+from conduit.context_estimate import CONTEXT_CHARS_PER_TOKEN
+
+
+def _default_context_estimate_response() -> "ContextEstimateResponse":
+    return ContextEstimateResponse(
+        chars=0,
+        tokens=0,
+        chars_per_token=CONTEXT_CHARS_PER_TOKEN,
+    )
+
+
+class ContextEstimateResponse(BaseModel):
+    chars: int
+    tokens: int
+    chars_per_token: float = CONTEXT_CHARS_PER_TOKEN
+
 
 class HealthResponse(BaseModel):
     ok: bool
@@ -15,6 +31,7 @@ class HealthResponse(BaseModel):
     model_label: str
     provider: str
     provider_api_key_configured: bool
+    context_chars_per_token: float = CONTEXT_CHARS_PER_TOKEN
 
 
 class SessionResponse(BaseModel):
@@ -53,6 +70,9 @@ class TranscriptMessage(BaseModel):
 class SessionDetailResponse(BaseModel):
     session_id: str
     messages: list[TranscriptMessage] = Field(default_factory=list)
+    context_estimate: ContextEstimateResponse = Field(
+        default_factory=_default_context_estimate_response
+    )
 
 
 class ChatContextRequest(BaseModel):
@@ -71,6 +91,9 @@ class ChatResponse(BaseModel):
     session_id: str
     reply: str
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    context_estimate: ContextEstimateResponse = Field(
+        default_factory=_default_context_estimate_response
+    )
 
 
 class ModelOptionResponse(BaseModel):

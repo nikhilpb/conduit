@@ -1,3 +1,5 @@
+import 'context_estimate.dart';
+
 class HealthStatus {
   const HealthStatus({
     required this.ok,
@@ -5,6 +7,7 @@ class HealthStatus {
     required this.model,
     required this.modelLabel,
     required this.provider,
+    required this.contextCharsPerToken,
   });
 
   factory HealthStatus.fromJson(Map<String, dynamic> json) {
@@ -14,6 +17,9 @@ class HealthStatus {
       model: json['model'] as String? ?? '',
       modelLabel: json['model_label'] as String? ?? '',
       provider: json['provider'] as String? ?? '',
+      contextCharsPerToken:
+          (json['context_chars_per_token'] as num?)?.toDouble() ??
+          defaultContextCharsPerToken,
     );
   }
 
@@ -22,6 +28,7 @@ class HealthStatus {
   final String model;
   final String modelLabel;
   final String provider;
+  final double contextCharsPerToken;
 }
 
 class SessionSummary {
@@ -162,7 +169,11 @@ class TranscriptMessage {
 }
 
 class SessionDetail {
-  const SessionDetail({required this.sessionId, required this.messages});
+  const SessionDetail({
+    required this.sessionId,
+    required this.messages,
+    required this.contextEstimate,
+  });
 
   factory SessionDetail.fromJson(Map<String, dynamic> json) {
     final messages = (json['messages'] as List<dynamic>? ?? const [])
@@ -172,11 +183,17 @@ class SessionDetail {
     return SessionDetail(
       sessionId: json['session_id'] as String,
       messages: messages,
+      contextEstimate: json['context_estimate'] == null
+          ? ContextEstimate.empty
+          : ContextEstimate.fromJson(
+              Map<String, dynamic>.from(json['context_estimate'] as Map),
+            ),
     );
   }
 
   final String sessionId;
   final List<TranscriptMessage> messages;
+  final ContextEstimate contextEstimate;
 }
 
 class ChatReply {
@@ -184,6 +201,7 @@ class ChatReply {
     required this.sessionId,
     required this.reply,
     required this.toolCalls,
+    required this.contextEstimate,
   });
 
   factory ChatReply.fromJson(Map<String, dynamic> json) {
@@ -193,12 +211,18 @@ class ChatReply {
       toolCalls: _parseRenderableToolCalls(
         json['tool_calls'] as List<dynamic>?,
       ),
+      contextEstimate: json['context_estimate'] == null
+          ? ContextEstimate.empty
+          : ContextEstimate.fromJson(
+              Map<String, dynamic>.from(json['context_estimate'] as Map),
+            ),
     );
   }
 
   final String sessionId;
   final String reply;
   final List<ToolCall> toolCalls;
+  final ContextEstimate contextEstimate;
 }
 
 class ChatServerEvent {
@@ -220,6 +244,8 @@ class ChatServerEvent {
     this.status,
     this.error,
     this.response,
+    this.contextCharsDelta = 0,
+    this.contextEstimate,
   });
 
   factory ChatServerEvent.fromJson(Map<String, dynamic> json) {
@@ -243,6 +269,12 @@ class ChatServerEvent {
       response: json['response'] == null
           ? null
           : Map<String, dynamic>.from(json['response'] as Map),
+      contextCharsDelta: (json['context_chars_delta'] as num?)?.toInt() ?? 0,
+      contextEstimate: json['context_estimate'] == null
+          ? null
+          : ContextEstimate.fromJson(
+              Map<String, dynamic>.from(json['context_estimate'] as Map),
+            ),
     );
   }
 
@@ -263,6 +295,8 @@ class ChatServerEvent {
   final String? status;
   final String? error;
   final Map<String, dynamic>? response;
+  final int contextCharsDelta;
+  final ContextEstimate? contextEstimate;
 
   bool get isTerminal => type == 'done' || type == 'error';
 }

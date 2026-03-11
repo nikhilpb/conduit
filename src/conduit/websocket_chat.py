@@ -15,6 +15,7 @@ from google.adk.flows.llm_flows.functions import (
 from google.adk.sessions.session import Session
 from google.genai import types
 
+from conduit.context_estimate import estimate_tool_result_chars
 from conduit.runtime import ConduitRuntime
 from conduit.sessions.sqlite_service import ClientTurnRecord
 from conduit.tool_permissions import permission_summary
@@ -387,6 +388,10 @@ class WebSocketChatManager:
                         function_response.response,
                     )
                     status, error = tool_response_status(function_response.response)
+                    context_chars_delta = estimate_tool_result_chars(
+                        function_response.name,
+                        function_response.response,
+                    )
                     _upsert_tool_call(
                         turn.tool_calls,
                         tool_call_id=tool_call_id,
@@ -404,6 +409,7 @@ class WebSocketChatManager:
                             "status": status,
                             "error": error,
                             "response": response,
+                            "context_chars_delta": context_chars_delta,
                         }
                     )
 
@@ -443,12 +449,14 @@ class WebSocketChatManager:
                     }
                 )
 
+            context_estimate = await self.runtime.get_session_context_estimate(session.id)
             await turn.publish(
                 {
                     "type": "done",
                     "turn_id": turn.turn_id,
                     "session_id": session.id,
                     "message_id": turn.assistant_message_id,
+                    "context_estimate": context_estimate.to_payload(),
                 }
             )
             event_history = await turn.snapshot_history()

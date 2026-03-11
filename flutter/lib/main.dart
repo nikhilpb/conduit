@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'context_estimate.dart';
 import 'conduit_api.dart';
 import 'models.dart';
 import 'settings_store.dart';
@@ -359,12 +360,14 @@ class ChatScreen extends StatefulWidget {
     required this.settingsStore,
     this.sessionId,
     this.initialTitle,
-  });
+    DateTime Function()? nowProvider,
+  }) : nowProvider = nowProvider ?? DateTime.now;
 
   final ConduitApiClient client;
   final SettingsStore settingsStore;
   final String? sessionId;
   final String? initialTitle;
+  final DateTime Function() nowProvider;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -389,6 +392,12 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _submittingApproval = false;
   bool _disposed = false;
   String? _activeModelLabel;
+  double _contextCharsPerToken = defaultContextCharsPerToken;
+  int _completedSessionChars = 0;
+  UserContextSettings _savedUserContextSettings = const UserContextSettings(
+    location: '',
+    personalInstructions: '',
+  );
   late String? _sessionId = widget.sessionId;
   late String _sessionTitle = widget.initialTitle ?? 'New conversation';
 
@@ -397,8 +406,10 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _composer.addListener(_handleComposerChanged);
     _loadMessages();
     _loadActiveModel();
+    _loadUserContextSettings();
     _connectChat();
   }
 
@@ -408,9 +419,17 @@ class _ChatScreenState extends State<ChatScreen> {
     _reconnectTimer?.cancel();
     unawaited(_chatSubscription?.cancel() ?? Future<void>.value());
     unawaited(_chatSocket?.dispose() ?? Future<void>.value());
+    _composer.removeListener(_handleComposerChanged);
     _composer.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _handleComposerChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   Future<void> _loadMessages() async {
@@ -420,6 +439,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages = const [];
         _loading = false;
         _error = null;
+        _completedSessionChars = 0;
       });
       return;
     }
@@ -438,6 +458,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages = detail.messages;
         _loading = false;
         _sessionTitle = _deriveSessionTitle(detail.messages) ?? _sessionTitle;
+        _completedSessionChars = detail.contextEstimate.chars;
       });
       _scrollToBottom();
     } catch (error) {
@@ -461,6 +482,9 @@ class _ChatScreenState extends State<ChatScreen> {
         _activeModelLabel = health.modelLabel.isNotEmpty
             ? health.modelLabel
             : health.model;
+        _contextCharsPerToken = health.contextCharsPerToken > 0
+            ? health.contextCharsPerToken
+            : defaultContextCharsPerToken;
       });
     } catch (_) {
       if (!mounted) {
@@ -468,8 +492,19 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       setState(() {
         _activeModelLabel = null;
+        _contextCharsPerToken = defaultContextCharsPerToken;
       });
     }
+  }
+
+  Future<void> _loadUserContextSettings() async {
+    final savedSettings = await widget.settingsStore.loadUserContextSettings();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _savedUserContextSettings = savedSettings;
+    });
   }
 
   Future<void> _sendMessage() async {
@@ -516,10 +551,11 @@ class _ChatScreenState extends State<ChatScreen> {
           context: turnContext,
           userMessageId: optimisticMessage.messageId,
           assistantMessageId: assistantMessageId,
+          contextCharsContribution: text.length,
         ),
       };
-      _composer.clear();
     });
+    _composer.clear();
     _scrollToBottom();
 
     await _sendPendingTurn(clientMessageId);
@@ -649,12 +685,41 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<_TurnContextPayload> _buildTurnContext() async {
     final savedSettings = await widget.settingsStore.loadUserContextSettings();
+    if (mounted) {
+      setState(() {
+        _savedUserContextSettings = savedSettings;
+      });
+    }
     return _TurnContextPayload(
-      currentTime: _formatCurrentTimeForContext(DateTime.now()),
+      currentTime: formatCurrentTimeForContext(widget.nowProvider()),
       location: savedSettings.location,
       personalInstructions: savedSettings.personalInstructions,
     );
   }
+
+  int get _hiddenContextChars => estimateHiddenContextChars(
+    currentTime: formatCurrentTimeForContext(widget.nowProvider()),
+    location: _savedUserContextSettings.location,
+    personalInstructions: _savedUserContextSettings.personalInstructions,
+  );
+
+  int get _draftContextChars => _composer.text.trim().length;
+
+  int get _pendingContextChars => _pendingTurns.values.fold<int>(
+    0,
+    (sum, turn) => sum + turn.contextCharsContribution,
+  );
+
+  int get _estimatedContextChars =>
+      _completedSessionChars +
+      _hiddenContextChars +
+      _draftContextChars +
+      _pendingContextChars;
+
+  int get _estimatedContextTokens => estimateTokensFromChars(
+    _estimatedContextChars,
+    charsPerToken: _contextCharsPerToken,
+  );
 
   void _handleChatEvent(ConduitChatSocket socket, ChatServerEvent event) {
     if (_disposed || !mounted || !identical(socket, _chatSocket)) {
@@ -754,6 +819,9 @@ class _ChatScreenState extends State<ChatScreen> {
       assistantMessageId: assistantMessageId,
       toolCalls: updatedToolCalls,
       seenToolCallIds: [...pendingTurn.seenToolCallIds, toolCallId],
+      contextCharsContribution:
+          pendingTurn.contextCharsContribution +
+          estimateToolCallChars(visibleToolName, event.args),
     );
   }
 
@@ -789,6 +857,8 @@ class _ChatScreenState extends State<ChatScreen> {
       clientMessageId: clientMessageId,
       assistantMessageId: assistantMessageId,
       toolCalls: updatedToolCalls,
+      contextCharsContribution:
+          pendingTurn.contextCharsContribution + event.contextCharsDelta,
     );
   }
 
@@ -812,6 +882,8 @@ class _ChatScreenState extends State<ChatScreen> {
       clientMessageId: clientMessageId,
       assistantMessageId: assistantMessageId,
       text: (existing?.text ?? '') + content,
+      contextCharsContribution:
+          pendingTurn.contextCharsContribution + content.length,
     );
     _scrollToBottom();
   }
@@ -865,6 +937,8 @@ class _ChatScreenState extends State<ChatScreen> {
       _clientMessageIdByTurnId = nextTurnMap;
       _connectionState = _ChatConnectionState.connected;
       _connectionError = null;
+      _completedSessionChars =
+          event.contextEstimate?.chars ?? _completedSessionChars;
     });
   }
 
@@ -1024,6 +1098,7 @@ class _ChatScreenState extends State<ChatScreen> {
     String? thinkingTrace,
     List<ToolCall>? toolCalls,
     List<String>? seenToolCallIds,
+    int? contextCharsContribution,
   }) {
     final pendingTurn = _pendingTurns[clientMessageId];
     if (pendingTurn == null) {
@@ -1068,6 +1143,7 @@ class _ChatScreenState extends State<ChatScreen> {
         clientMessageId: pendingTurn.copyWith(
           assistantMessageId: assistantMessageId,
           seenToolCallIds: seenToolCallIds,
+          contextCharsContribution: contextCharsContribution,
         ),
       };
     });
@@ -1226,6 +1302,15 @@ class _ChatScreenState extends State<ChatScreen> {
                         onDeny: () => _respondToApproval(false),
                       ),
                     ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                    child: ContextEstimateStrip(
+                      label: 'Est. context',
+                      tokenLabel: formatTokenEstimate(_estimatedContextTokens),
+                      usageLevel: classifyContextUsage(_estimatedContextTokens),
+                      progress: contextUsageProgress(_estimatedContextTokens),
+                    ),
+                  ),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -2474,6 +2559,72 @@ String _ellipsize(String value, int maxLength) {
   return '${value.substring(0, maxLength - 1)}…';
 }
 
+class ContextEstimateStrip extends StatelessWidget {
+  const ContextEstimateStrip({
+    super.key,
+    required this.label,
+    required this.tokenLabel,
+    required this.usageLevel,
+    required this.progress,
+  });
+
+  final String label;
+  final String tokenLabel;
+  final ContextUsageLevel usageLevel;
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final foregroundColor = switch (usageLevel) {
+      ContextUsageLevel.low => const Color(0xFF355C7D),
+      ContextUsageLevel.medium => const Color(0xFF9A6B17),
+      ContextUsageLevel.high => const Color(0xFFB85C38),
+    };
+    final trackColor = switch (usageLevel) {
+      ContextUsageLevel.low => const Color(0xFFD7E4EF),
+      ContextUsageLevel.medium => const Color(0xFFF0E3BF),
+      ContextUsageLevel.high => const Color(0xFFF0CDBF),
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: const Color(0xFF6B7280),
+              ),
+            ),
+            const Spacer(),
+            Text(
+              tokenLabel,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: foregroundColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: SizedBox(
+            height: 6,
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: trackColor,
+              valueColor: AlwaysStoppedAnimation<Color>(foregroundColor),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class StatusBadge extends StatelessWidget {
   const StatusBadge({super.key, required this.connected, required this.label});
 
@@ -2515,6 +2666,7 @@ class _PendingTurn {
     required this.text,
     required this.context,
     required this.userMessageId,
+    this.contextCharsContribution = 0,
     this.turnId,
     this.assistantMessageId,
     this.seenToolCallIds = const [],
@@ -2524,6 +2676,7 @@ class _PendingTurn {
   final String text;
   final _TurnContextPayload context;
   final String userMessageId;
+  final int contextCharsContribution;
   final String? turnId;
   final String? assistantMessageId;
   final List<String> seenToolCallIds;
@@ -2532,12 +2685,15 @@ class _PendingTurn {
     String? turnId,
     String? assistantMessageId,
     List<String>? seenToolCallIds,
+    int? contextCharsContribution,
   }) {
     return _PendingTurn(
       clientMessageId: clientMessageId,
       text: text,
       context: context,
       userMessageId: userMessageId,
+      contextCharsContribution:
+          contextCharsContribution ?? this.contextCharsContribution,
       turnId: turnId ?? this.turnId,
       assistantMessageId: assistantMessageId ?? this.assistantMessageId,
       seenToolCallIds: seenToolCallIds ?? this.seenToolCallIds,
@@ -2550,6 +2706,7 @@ class _PendingTurn {
       text: text,
       context: context,
       userMessageId: userMessageId,
+      contextCharsContribution: text.length,
     );
   }
 }
@@ -2614,26 +2771,6 @@ String _makeClientMessageId() {
   final entropy = math.Random().nextInt(1 << 20).toRadixString(16);
   return 'm_${microseconds}_$entropy';
 }
-
-String _formatCurrentTimeForContext(DateTime value) {
-  final local = value.toLocal();
-  final offset = local.timeZoneOffset;
-  final sign = offset.isNegative ? '-' : '+';
-  final absoluteOffset = offset.abs();
-  final offsetHours = absoluteOffset.inHours;
-  final offsetMinutes = absoluteOffset.inMinutes.remainder(60);
-  final timezoneName = local.timeZoneName.trim();
-  final offsetLabel =
-      'UTC$sign${_twoDigits(offsetHours)}:${_twoDigits(offsetMinutes)}';
-  final timezoneLabel = timezoneName.isEmpty
-      ? offsetLabel
-      : '$timezoneName ($offsetLabel)';
-  return '${local.year}-${_twoDigits(local.month)}-${_twoDigits(local.day)} '
-      '${_twoDigits(local.hour)}:${_twoDigits(local.minute)}:${_twoDigits(local.second)} '
-      '$timezoneLabel';
-}
-
-String _twoDigits(int value) => value.toString().padLeft(2, '0');
 
 String _makeDraftSessionId() {
   final microseconds = DateTime.now().microsecondsSinceEpoch;
