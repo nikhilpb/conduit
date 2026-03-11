@@ -17,6 +17,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config
+      - "${CONDUIT_EXTERNAL_SKILLS_DIR:-/Users/nikhilbhat/git/skills}:/app/external-skills:ro"
     healthcheck:
       test:
         [

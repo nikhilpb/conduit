@@ -11,6 +11,7 @@ from conduit.config import Settings
 from conduit.model_registry import infer_provider
 from conduit.tool_permissions import permission_summary
 from conduit.tools.polymarket import build_polymarket_tools
+from conduit.tools.recipe_lookup import build_recipe_lookup_tool
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
 from conduit.user_context import build_context_instructions
@@ -22,6 +23,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
     web_search = build_web_search_tool(settings)
     web_fetch = build_web_fetch_tool(settings)
     polymarket_tools = build_polymarket_tools(settings)
+    recipe_lookup = build_recipe_lookup_tool(settings)
     provider = infer_provider(model_name)
     model = model_name
     if provider == "anthropic":
@@ -32,36 +34,54 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
             interleaved_thinking=settings.anthropic_interleaved_thinking,
         )
 
+    description = (
+        "A personal assistant that can search the web, fetch webpages, "
+        "and inspect Polymarket prediction markets."
+    )
+    instruction_parts = [
+        "You are Conduit, a research assistant. ",
+        "Use web_search when you need to discover fresh information. ",
+        "Use web_fetch when you need to inspect a specific page or URL in detail. ",
+        "If a tool reports an error, treat it as a failed attempt and keep working when useful. ",
+        "Use polymarket_search_markets or polymarket_list_markets to find ",
+        "prediction markets on Polymarket. ",
+        "Use polymarket_get_market for current prices, liquidity, and trade volume. ",
+        "Use polymarket_get_price_history for historical price series by outcome. ",
+        "When the user asks for future-looking probabilities or who is likely ",
+        "to win or happen, such as an election outcome or a geopolitical event, ",
+        "check Polymarket first when it is relevant. ",
+        "The Polymarket tools are read-only and only expose public market data. ",
+        "Prefer citing concrete facts from fetched pages when possible. ",
+    ]
+    tools: list[object] = [
+        web_search,
+        web_fetch,
+        *polymarket_tools,
+    ]
+    if recipe_lookup is not None:
+        description = (
+            "A personal assistant that can search the web, fetch webpages, inspect "
+            "Polymarket prediction markets, and look up recipes from a local catalog."
+        )
+        instruction_parts.extend(
+            [
+                "Use recipe_lookup when the user asks for recipes, ingredients, steps, or macros "
+                "for dishes in the local recipe catalog. ",
+                "The recipe catalog is local and read-only through this tool, so do not promise "
+                "that you can add or edit recipes unless a separate write tool is available. ",
+            ]
+        )
+        tools.append(recipe_lookup)
+    instruction_parts.append("If you are uncertain, say so directly.")
+
     return Agent(
         name="conduit",
         model=model,
-        description=(
-            "A personal assistant that can search the web, fetch webpages, "
-            "and inspect Polymarket prediction markets."
-        ),
-        instruction=(
-            "You are Conduit, a research assistant. "
-            "Use web_search when you need to discover fresh information. "
-            "Use web_fetch when you need to inspect a specific page or URL in detail. "
-            "If a tool reports an error, treat it as a failed attempt and keep working when useful. "
-            "Use polymarket_search_markets or polymarket_list_markets to find "
-            "prediction markets on Polymarket. "
-            "Use polymarket_get_market for current prices, liquidity, and trade volume. "
-            "Use polymarket_get_price_history for historical price series by outcome. "
-            "When the user asks for future-looking probabilities or who is likely "
-            "to win or happen, such as an election outcome or a geopolitical event, "
-            "check Polymarket first when it is relevant. "
-            "The Polymarket tools are read-only and only expose public market data. "
-            "Prefer citing concrete facts from fetched pages when possible. "
-            "If you are uncertain, say so directly."
-        ),
+        description=description,
+        instruction="".join(instruction_parts),
         before_model_callback=_build_before_model_callback(),
         before_tool_callback=_build_before_tool_callback(settings),
-        tools=[
-            web_search,
-            web_fetch,
-            *polymarket_tools,
-        ],
+        tools=tools,
     )
 
 
