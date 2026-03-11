@@ -18,6 +18,10 @@ tools:
 
     assert permissions["web_search"] == "allow"
     assert permissions["web_fetch"] == "ask"
+    assert permissions["polymarket_search_markets"] == "allow"
+    assert permissions["polymarket_list_markets"] == "allow"
+    assert permissions["polymarket_get_market"] == "allow"
+    assert permissions["polymarket_get_price_history"] == "allow"
     assert permissions["send_email"] == "deny"
 
 

@@ -10,6 +10,7 @@ from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
 from conduit.config import Settings
 from conduit.model_registry import infer_provider
 from conduit.tool_permissions import permission_summary
+from conduit.tools.polymarket import build_polymarket_tools
 from conduit.tools.web_search import build_web_search_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
 from conduit.user_context import build_context_instructions
@@ -20,6 +21,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
 
     web_search = build_web_search_tool(settings)
     web_fetch = build_web_fetch_tool(settings)
+    polymarket_tools = build_polymarket_tools(settings)
     provider = infer_provider(model_name)
     model = model_name
     if provider == "anthropic":
@@ -33,12 +35,20 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
     return Agent(
         name="conduit",
         model=model,
-        description="A personal assistant that can search the web and fetch webpages.",
+        description=(
+            "A personal assistant that can search the web, fetch webpages, "
+            "and inspect Polymarket prediction markets."
+        ),
         instruction=(
             "You are Conduit, a research assistant. "
             "Use web_search when you need to discover fresh information. "
             "Use web_fetch when you need to inspect a specific page or URL in detail. "
             "If a tool reports an error, treat it as a failed attempt and keep working when useful. "
+            "Use polymarket_search_markets or polymarket_list_markets to find "
+            "prediction markets on Polymarket. "
+            "Use polymarket_get_market for current prices, liquidity, and trade volume. "
+            "Use polymarket_get_price_history for historical price series by outcome. "
+            "The Polymarket tools are read-only and only expose public market data. "
             "Prefer citing concrete facts from fetched pages when possible. "
             "If you are uncertain, say so directly."
         ),
@@ -47,6 +57,7 @@ def build_root_agent(settings: Settings, *, model_name: str) -> Agent:
         tools=[
             web_search,
             web_fetch,
+            *polymarket_tools,
         ],
     )
 

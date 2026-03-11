@@ -3,3 +3,11 @@ tools:
     mode: allow
   web_fetch:
     mode: allow
+  polymarket_search_markets:
+    mode: allow
+  polymarket_list_markets:
+    mode: allow
+  polymarket_get_market:
+    mode: allow
+  polymarket_get_price_history:
+    mode: allow

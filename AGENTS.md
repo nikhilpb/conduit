@@ -17,6 +17,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Tooling is currently limited to:
   - `web_search`: Brave Search API first, Ecosia HTML fallback.
   - `web_fetch`: HTTP/HTML/text fetch with cleaned content extraction.
+  - `polymarket_search_markets` / `polymarket_list_markets` / `polymarket_get_market` / `polymarket_get_price_history`: public Polymarket market lookup, current pricing, price history, liquidity, and volume snapshots.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Supported base models:
   - `Claude Opus 4.6`
@@ -57,6 +58,8 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Converts client context into ADK state delta and hidden model instructions.
 - `src/conduit/tool_permissions.py`
   - Loads `allow` / `ask` / `deny` policy from `config/tools.yaml`.
+- `src/conduit/tools/polymarket.py`
+  - Public Polymarket Gamma/CLOB API integration for market lookup and pricing history.
 
 ## Client Structure
 
