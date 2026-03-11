@@ -15,7 +15,7 @@ Android (Flutter)  ──WebSocket──▶  FastAPI :18423  ──▶  Google A
 ## Architecture
 
 - **Backend:** Python, FastAPI, Google ADK, SQLite, managed with `uv`.
-- **Client:** Flutter Android app in `client/think_client/`.
+- **Client:** Flutter Android app in `flutter/`.
 - **Deployment:** Docker Compose, Tailscale-only access on port `18423`.
 - **Models:** Claude Opus 4.6, Claude Sonnet 4.6, Gemini 3 Flash, Gemini 3.1 Pro — switchable at runtime via `config/models.yaml`.
 - **Built-in tools:** `web_search`, `web_fetch`, `bash` (host command execution with mandatory approval), and public Polymarket market lookup/price-history tools.
@@ -92,7 +92,7 @@ uv run conduit-api
 ### Build and Run
 
 ```bash
-cd client/think_client
+cd flutter
 
 # Get dependencies
 flutter pub get
@@ -109,7 +109,7 @@ The server URL can also be changed later from the in-app settings screen.
 ### Checks
 
 ```bash
-cd client/think_client
+cd flutter
 flutter analyze
 flutter test
 ```
