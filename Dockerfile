@@ -1,10 +1,12 @@
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
+# Keep the default pinned, but allow rebuilds against a newer Codex release.
+ARG CODEX_VERSION=0.114.0
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    CODEX_VERSION=0.114.0
+    UV_LINK_MODE=copy
 
 WORKDIR /app
 
