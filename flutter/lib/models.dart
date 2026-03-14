@@ -37,6 +37,8 @@ class SessionSummary {
     required this.lastUpdateTime,
     required this.eventCount,
     required this.title,
+    this.kind = 'interactive',
+    this.readOnly = false,
   });
 
   factory SessionSummary.fromJson(Map<String, dynamic> json) {
@@ -45,6 +47,8 @@ class SessionSummary {
       lastUpdateTime: (json['last_update_time'] as num?)?.toDouble() ?? 0,
       eventCount: json['event_count'] as int? ?? 0,
       title: json['title'] as String? ?? '',
+      kind: json['kind'] as String? ?? 'interactive',
+      readOnly: json['read_only'] as bool? ?? false,
     );
   }
 
@@ -52,6 +56,10 @@ class SessionSummary {
   final double lastUpdateTime;
   final int eventCount;
   final String title;
+  final String kind;
+  final bool readOnly;
+
+  bool get isScheduled => kind == 'scheduled';
 }
 
 const Set<String> _hiddenToolCallNames = {'adk_request_confirmation'};
@@ -171,6 +179,8 @@ class TranscriptMessage {
 class SessionDetail {
   const SessionDetail({
     required this.sessionId,
+    required this.kind,
+    required this.readOnly,
     required this.messages,
     required this.contextEstimate,
   });
@@ -182,6 +192,8 @@ class SessionDetail {
         .toList();
     return SessionDetail(
       sessionId: json['session_id'] as String,
+      kind: json['kind'] as String? ?? 'interactive',
+      readOnly: json['read_only'] as bool? ?? false,
       messages: messages,
       contextEstimate: json['context_estimate'] == null
           ? ContextEstimate.empty
@@ -192,8 +204,12 @@ class SessionDetail {
   }
 
   final String sessionId;
+  final String kind;
+  final bool readOnly;
   final List<TranscriptMessage> messages;
   final ContextEstimate contextEstimate;
+
+  bool get isScheduled => kind == 'scheduled';
 }
 
 class ChatReply {

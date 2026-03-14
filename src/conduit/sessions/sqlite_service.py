@@ -24,6 +24,9 @@ from google.adk.sessions.base_session_service import ListSessionsResponse
 from google.adk.sessions.session import Session
 from google.adk.sessions.state import State
 
+from conduit.session_metadata import session_kind_from_state
+from conduit.session_metadata import session_read_only_from_state
+
 
 @dataclass(slots=True)
 class ClientTurnRecord:
@@ -46,6 +49,8 @@ class SessionSummaryRecord:
     last_update_time: float
     event_count: int
     title: str
+    kind: str
+    read_only: bool
 
 
 class SQLiteSessionService(BaseSessionService):
@@ -199,6 +204,17 @@ class SQLiteSessionService(BaseSessionService):
                     FOREIGN KEY (app_name, user_id, session_id)
                         REFERENCES sessions(app_name, user_id, session_id)
                         ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS scheduled_session_runs (
+                    schedule_id TEXT NOT NULL,
+                    scheduled_for TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    session_id TEXT,
+                    error_message TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (schedule_id, scheduled_for)
                 );
                 """
             )
@@ -557,6 +573,7 @@ class SQLiteSessionService(BaseSessionService):
                 """
                 SELECT
                     s.session_id,
+                    s.state_json,
                     s.last_update_time,
                     COUNT(e.event_id) AS event_count
                 FROM sessions AS s
@@ -565,26 +582,32 @@ class SQLiteSessionService(BaseSessionService):
                     AND e.user_id = s.user_id
                     AND e.session_id = s.session_id
                 WHERE s.app_name = ? AND s.user_id = ?
-                GROUP BY s.session_id, s.last_update_time
+                GROUP BY s.session_id, s.state_json, s.last_update_time
                 ORDER BY s.last_update_time DESC
                 """,
                 (app_name, user_id),
             ).fetchall()
 
-            return [
-                SessionSummaryRecord(
-                    session_id=row["session_id"],
-                    last_update_time=row["last_update_time"],
-                    event_count=int(row["event_count"] or 0),
-                    title=self._load_session_title(
-                        connection,
-                        app_name=app_name,
-                        user_id=user_id,
+            summaries: list[SessionSummaryRecord] = []
+            for row in rows:
+                session_state = json.loads(row["state_json"])
+                summaries.append(
+                    SessionSummaryRecord(
                         session_id=row["session_id"],
-                    ),
+                        last_update_time=row["last_update_time"],
+                        event_count=int(row["event_count"] or 0),
+                        title=self._load_session_title(
+                            connection,
+                            app_name=app_name,
+                            user_id=user_id,
+                            session_id=row["session_id"],
+                        ),
+                        kind=session_kind_from_state(session_state),
+                        read_only=session_read_only_from_state(session_state),
+                    )
                 )
-                for row in rows
-            ]
+
+            return summaries
 
     def _load_session_title(
         self,
@@ -712,6 +735,49 @@ class SQLiteSessionService(BaseSessionService):
             user_id=user_id,
         )
 
+    async def claim_scheduled_run(
+        self,
+        *,
+        schedule_id: str,
+        scheduled_for: str,
+    ) -> bool:
+        async with self._write_lock:
+            return await asyncio.to_thread(
+                self._claim_scheduled_run_sync,
+                schedule_id=schedule_id,
+                scheduled_for=scheduled_for,
+            )
+
+    async def mark_scheduled_run_completed(
+        self,
+        *,
+        schedule_id: str,
+        scheduled_for: str,
+        session_id: str,
+    ) -> None:
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._mark_scheduled_run_completed_sync,
+                schedule_id=schedule_id,
+                scheduled_for=scheduled_for,
+                session_id=session_id,
+            )
+
+    async def mark_scheduled_run_failed(
+        self,
+        *,
+        schedule_id: str,
+        scheduled_for: str,
+        error_message: str,
+    ) -> None:
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._mark_scheduled_run_failed_sync,
+                schedule_id=schedule_id,
+                scheduled_for=scheduled_for,
+                error_message=error_message,
+            )
+
     def _get_client_turn_sync(
         self,
         *,
@@ -746,6 +812,82 @@ class SQLiteSessionService(BaseSessionService):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    def _claim_scheduled_run_sync(
+        self,
+        *,
+        schedule_id: str,
+        scheduled_for: str,
+    ) -> bool:
+        now = time.time()
+        with self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT 1
+                FROM scheduled_session_runs
+                WHERE schedule_id = ? AND scheduled_for = ?
+                """,
+                (schedule_id, scheduled_for),
+            ).fetchone()
+            if existing is not None:
+                return False
+
+            connection.execute(
+                """
+                INSERT INTO scheduled_session_runs (
+                    schedule_id,
+                    scheduled_for,
+                    status,
+                    session_id,
+                    error_message,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, 'running', NULL, NULL, ?, ?)
+                """,
+                (schedule_id, scheduled_for, now, now),
+            )
+        return True
+
+    def _mark_scheduled_run_completed_sync(
+        self,
+        *,
+        schedule_id: str,
+        scheduled_for: str,
+        session_id: str,
+    ) -> None:
+        now = time.time()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE scheduled_session_runs
+                SET status = 'completed',
+                    session_id = ?,
+                    error_message = NULL,
+                    updated_at = ?
+                WHERE schedule_id = ? AND scheduled_for = ?
+                """,
+                (session_id, now, schedule_id, scheduled_for),
+            )
+
+    def _mark_scheduled_run_failed_sync(
+        self,
+        *,
+        schedule_id: str,
+        scheduled_for: str,
+        error_message: str,
+    ) -> None:
+        now = time.time()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE scheduled_session_runs
+                SET status = 'failed',
+                    error_message = ?,
+                    updated_at = ?
+                WHERE schedule_id = ? AND scheduled_for = ?
+                """,
+                (error_message, now, schedule_id, scheduled_for),
+            )
 
     def _save_client_turn_started_sync(
         self,

@@ -400,6 +400,7 @@ class _ChatScreenState extends State<ChatScreen> {
   );
   late String? _sessionId = widget.sessionId;
   late String _sessionTitle = widget.initialTitle ?? 'New conversation';
+  bool _sessionReadOnly = false;
 
   bool get _sending => _pendingTurns.isNotEmpty;
 
@@ -440,6 +441,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _loading = false;
         _error = null;
         _completedSessionChars = 0;
+        _sessionReadOnly = false;
       });
       return;
     }
@@ -459,6 +461,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _loading = false;
         _sessionTitle = _deriveSessionTitle(detail.messages) ?? _sessionTitle;
         _completedSessionChars = detail.contextEstimate.chars;
+        _sessionReadOnly = detail.readOnly;
       });
       _scrollToBottom();
     } catch (error) {
@@ -509,7 +512,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _sendMessage() async {
     final text = _composer.text.trim();
-    if (text.isEmpty || _sending) {
+    if (text.isEmpty || _sending || _sessionReadOnly) {
       return;
     }
 
@@ -1302,31 +1305,66 @@ class _ChatScreenState extends State<ChatScreen> {
                         onDeny: () => _respondToApproval(false),
                       ),
                     ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                    child: ContextEstimateStrip(
-                      label: 'Est. context',
-                      tokenLabel: formatTokenEstimate(_estimatedContextTokens),
-                      usageLevel: classifyContextUsage(_estimatedContextTokens),
-                      progress: contextUsageProgress(_estimatedContextTokens),
+                  if (_sessionReadOnly)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF3E0),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFE0B073)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.schedule_rounded,
+                            color: Color(0xFF9A5B14),
+                          ),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Scheduled session. This transcript was generated automatically and is read-only.',
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                      child: ContextEstimateStrip(
+                        label: 'Est. context',
+                        tokenLabel: formatTokenEstimate(
+                          _estimatedContextTokens,
+                        ),
+                        usageLevel: classifyContextUsage(
+                          _estimatedContextTokens,
+                        ),
+                        progress: contextUsageProgress(_estimatedContextTokens),
+                      ),
                     ),
-                  ),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton(
                         tooltip: 'Image',
-                        onPressed: () => _showUnavailable('Image attachments'),
+                        onPressed: _sessionReadOnly
+                            ? null
+                            : () => _showUnavailable('Image attachments'),
                         icon: const Icon(Icons.add_photo_alternate_outlined),
                       ),
                       IconButton(
                         tooltip: 'Voice',
-                        onPressed: () => _showUnavailable('Voice input'),
+                        onPressed: _sessionReadOnly
+                            ? null
+                            : () => _showUnavailable('Voice input'),
                         icon: const Icon(Icons.graphic_eq),
                       ),
                       Expanded(
                         child: TextField(
                           controller: _composer,
+                          enabled: !_sessionReadOnly,
                           minLines: 1,
                           maxLines: 5,
                           textInputAction: TextInputAction.newline,
@@ -1356,7 +1394,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                       const SizedBox(width: 8),
                       FilledButton(
-                        onPressed: _sending ? null : _sendMessage,
+                        onPressed: (_sending || _sessionReadOnly)
+                            ? null
+                            : _sendMessage,
                         style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFFB85C38),
                           foregroundColor: Colors.white,
@@ -1954,11 +1994,38 @@ class SessionCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      session.title,
-                      style: Theme.of(context).textTheme.titleMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            session.title,
+                            style: Theme.of(context).textTheme.titleMedium,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (session.isScheduled) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE9F4EC),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'Scheduled',
+                              style: Theme.of(context).textTheme.labelMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFF1F6A3B),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(

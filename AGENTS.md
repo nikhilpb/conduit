@@ -26,6 +26,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `recipe_lookup`: read-only lookup against a local `recipes.json` catalog when `config/recipes.yaml` resolves to an existing file.
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
+- Backend-configured scheduled sessions can create read-only visible sessions from cron schedules in `config/scheduled_sessions.yaml`.
 - Supported base models:
   - `Claude Opus 4.6`
   - `Claude Sonnet 4.6`
@@ -69,6 +70,8 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - `src/conduit/tool_permissions.py`
   - Loads `allow` / `ask` / `deny` policy from `config/tools.yaml`.
   - Enforces that `bash` stays approval-gated even if configured as `allow`.
+- `src/conduit/scheduled_sessions.py`
+  - Loads scheduled-session config, validates allowed tools/models, and runs due jobs in a background poller.
 - `src/conduit/recipe_catalog.py`
   - Resolves the configured recipe catalog path and ranks recipe matches.
 - `src/conduit/tools/bash.py`
@@ -95,6 +98,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 
 - Sessions are lazy-created from the first sent message; opening “New session” alone does not create one.
 - Session title is derived from the first user message.
+- Scheduled sessions are backend-created, appear in the normal session list, and are read-only in the client.
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.
 - Tool calls get explicit UI treatment; approval requests are surfaced inline.
@@ -124,6 +128,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Important paths:
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`
+  - scheduled sessions config: `config/scheduled_sessions.yaml`
   - recipe catalog config: `config/recipes.yaml`
   - tool permissions: `config/tools.yaml`
 - Default backend bind: `0.0.0.0:18423`

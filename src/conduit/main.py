@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from contextlib import suppress
 
 from fastapi import FastAPI
@@ -18,6 +19,9 @@ from conduit.context_estimate import CONTEXT_CHARS_PER_TOKEN
 from conduit.context_estimate import ContextEstimate
 from conduit.context_estimate import estimate_events_context
 from conduit.runtime import ConduitRuntime
+from conduit.runtime import ReadOnlySessionError
+from conduit.scheduled_sessions import load_scheduled_sessions_config
+from conduit.scheduled_sessions import ScheduledSessionService
 from conduit.schemas import ChatRequest
 from conduit.schemas import ChatResponse
 from conduit.schemas import ContextEstimateResponse
@@ -36,6 +40,8 @@ from conduit.tool_call_utils import tool_response_status
 from conduit.user_context import build_state_delta
 from conduit.user_context import coerce_turn_context
 from conduit.websocket_chat import WebSocketChatManager
+from conduit.session_metadata import session_kind_from_state
+from conduit.session_metadata import session_read_only_from_state
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -44,15 +50,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     runtime = ConduitRuntime(resolved_settings)
     chat_manager = WebSocketChatManager(runtime)
+    scheduled_sessions = load_scheduled_sessions_config(
+        resolved_settings.scheduled_sessions_config_path,
+        settings=resolved_settings,
+        model_registry=runtime.model_registry,
+    )
+    scheduled_session_service = ScheduledSessionService(runtime, scheduled_sessions)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        await scheduled_session_service.start()
+        try:
+            yield
+        finally:
+            await scheduled_session_service.stop()
 
     app = FastAPI(
         title="Conduit API",
         version="0.1.0",
         description="Minimal ADK-backed FastAPI gateway for Conduit.",
+        lifespan=lifespan,
     )
     app.state.settings = resolved_settings
     app.state.runtime = runtime
     app.state.chat_manager = chat_manager
+    app.state.scheduled_session_service = scheduled_session_service
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -101,6 +123,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     last_update_time=session.last_update_time,
                     event_count=session.event_count,
                     title=session.title,
+                    kind=session.kind,
+                    read_only=session.read_only,
                 )
                 for session in sessions
             ]
@@ -113,6 +137,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         return SessionDetailResponse(
             session_id=session.id,
+            kind=session_kind_from_state(session.state),
+            read_only=session_read_only_from_state(session.state),
             messages=_build_transcript(session.events),
             context_estimate=_context_estimate_response(
                 estimate_events_context(session.events)
@@ -128,11 +154,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/chat", response_model=ChatResponse)
     async def chat(payload: ChatRequest) -> ChatResponse:
-        result = await runtime.run_turn(
-            message=payload.message,
-            session_id=payload.session_id,
-            state_delta=build_state_delta(coerce_turn_context(payload.context)),
-        )
+        try:
+            result = await runtime.run_turn(
+                message=payload.message,
+                session_id=payload.session_id,
+                state_delta=build_state_delta(coerce_turn_context(payload.context)),
+            )
+        except ReadOnlySessionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return ChatResponse(
             session_id=result.session_id,
             reply=result.reply,

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
+import time
 from typing import AsyncIterator
 from typing import Any
 from typing import Literal
@@ -26,6 +28,8 @@ from conduit.model_registry import ModelOption
 from conduit.model_registry import ModelRegistry
 from conduit.model_registry import load_model_registry
 from conduit.model_registry import persist_model_registry
+from conduit.session_metadata import build_scheduled_session_state
+from conduit.session_metadata import session_read_only_from_state
 from conduit.sessions import SQLiteSessionService
 from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_call_utils import is_internal_tool_call
@@ -51,6 +55,16 @@ class RuntimeTurnUpdate:
     tool_status: str = "pending"
     tool_error: str | None = None
     text: str = ""
+
+
+@dataclass(slots=True)
+class RunnerBundle:
+    app: App
+    runner: Runner
+
+
+class ReadOnlySessionError(ValueError):
+    """Raised when a caller attempts to write into a read-only session."""
 
 
 class ConduitRuntime:
@@ -92,13 +106,19 @@ class ConduitRuntime:
             self._apply_model_registry(registry)
             return registry.active
 
-    async def create_session(self, session_id: str | None = None) -> Session:
+    async def create_session(
+        self,
+        session_id: str | None = None,
+        *,
+        state: dict[str, Any] | None = None,
+    ) -> Session:
         """Create a new chat session."""
 
         return await self.session_service.create_session(
             app_name=self.settings.app_name,
             user_id=self.settings.internal_user_id,
             session_id=session_id,
+            state=state,
         )
 
     async def list_sessions(self) -> list[Session]:
@@ -133,6 +153,15 @@ class ConduitRuntime:
             return empty_context_estimate()
         return estimate_events_context(session.events)
 
+    async def get_session(self, session_id: str) -> Session | None:
+        """Return one session by id if it exists."""
+
+        return await self.session_service.get_session(
+            app_name=self.settings.app_name,
+            user_id=self.settings.internal_user_id,
+            session_id=session_id,
+        )
+
     async def get_or_create_session(self, session_id: str | None = None) -> Session:
         """Return an existing session or create a new one."""
 
@@ -147,6 +176,19 @@ class ConduitRuntime:
         if session is not None:
             return session
         return await self.create_session(session_id=session_id)
+
+    async def get_or_create_writable_session(
+        self,
+        session_id: str | None = None,
+    ) -> Session:
+        """Return a writable session or create a new one."""
+
+        session = await self.get_or_create_session(session_id)
+        if session_read_only_from_state(session.state):
+            raise ReadOnlySessionError(
+                f"Session {session.id} is read-only and cannot accept new messages."
+            )
+        return session
 
     def create_invocation_id(self) -> str:
         """Create a stable invocation id for a websocket turn."""
@@ -267,7 +309,90 @@ class ConduitRuntime:
     ) -> TurnResult:
         """Run a single user turn against the ADK runner."""
 
-        session = await self.get_or_create_session(session_id)
+        session = await self.get_or_create_writable_session(session_id)
+        return await self._run_turn_with_runner(
+            session=session,
+            message=message,
+            state_delta=state_delta,
+            runner=self.http_runner,
+        )
+
+    async def run_scheduled_session(
+        self,
+        *,
+        schedule_id: str,
+        scheduled_for: datetime,
+        model_key: str,
+        seed_query: str,
+        allowed_tools: tuple[str, ...],
+    ) -> str:
+        """Execute one scheduled query and persist the final read-only session."""
+
+        model_option = self.model_registry.get(model_key)
+        if not self.settings.provider_api_key_configured_for(model_option.provider):
+            raise ValueError(
+                f"{model_option.provider} credentials are not configured."
+            )
+
+        temporary_session = await self.create_session()
+        try:
+            runner_bundle = self._build_runner_bundle(
+                model_option=model_option,
+                enable_bash=False,
+                allowed_tools=set(allowed_tools),
+                allow_tool_confirmation=False,
+            )
+            result = await self._run_turn_with_runner(
+                session=temporary_session,
+                message=seed_query,
+                runner=runner_bundle.runner,
+            )
+        finally:
+            await self.delete_session(temporary_session.id)
+
+        scheduled_session = await self.create_session(
+            state=build_scheduled_session_state(
+                schedule_id=schedule_id,
+                scheduled_for=scheduled_for.isoformat(),
+                model_key=model_key,
+                allowed_tools=allowed_tools,
+            )
+        )
+        invocation_id = self.create_invocation_id()
+        await self.session_service.append_event(
+            scheduled_session,
+            Event(
+                invocation_id=invocation_id,
+                author="user",
+                timestamp=scheduled_for.timestamp(),
+                content=types.Content(
+                    role="user",
+                    parts=[types.Part(text=seed_query)],
+                ),
+            ),
+        )
+        await self.session_service.append_event(
+            scheduled_session,
+            Event(
+                invocation_id=invocation_id,
+                author=self.settings.app_name,
+                timestamp=max(time.time(), scheduled_for.timestamp()),
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part(text=result.reply)],
+                ),
+            ),
+        )
+        return scheduled_session.id
+
+    async def _run_turn_with_runner(
+        self,
+        *,
+        session: Session,
+        message: str,
+        state_delta: dict[str, Any] | None = None,
+        runner: Runner,
+    ) -> TurnResult:
         tool_calls: list[dict[str, Any]] = []
         tool_call_index_by_id: dict[str, int] = {}
         reply = ""
@@ -276,7 +401,7 @@ class ConduitRuntime:
             session=session,
             message=message,
             state_delta=state_delta,
-            runner=self.http_runner,
+            runner=runner,
         ):
             if update.kind == "tool_call":
                 tool_call = {
@@ -325,30 +450,45 @@ class ConduitRuntime:
         )
 
     def _apply_model_registry(self, registry: ModelRegistry) -> None:
-        self.app = App(
+        interactive = self._build_runner_bundle(
+            model_option=registry.active,
+            enable_bash=True,
+        )
+        self.app = interactive.app
+        self.runner = interactive.runner
+
+        http = self._build_runner_bundle(
+            model_option=registry.active,
+            enable_bash=False,
+        )
+        self.http_app = http.app
+        self.http_runner = http.runner
+
+    def _build_runner_bundle(
+        self,
+        *,
+        model_option: ModelOption,
+        enable_bash: bool,
+        allowed_tools: set[str] | None = None,
+        allow_tool_confirmation: bool = True,
+    ) -> RunnerBundle:
+        app = App(
             name=self.settings.app_name,
             root_agent=build_root_agent(
                 self.settings,
-                model_name=registry.active.model,
+                model_name=model_option.model,
+                enable_bash=enable_bash,
+                allowed_tools=allowed_tools,
+                allow_tool_confirmation=allow_tool_confirmation,
             ),
             resumability_config=ResumabilityConfig(is_resumable=True),
         )
-        self.runner = Runner(
-            app=self.app,
-            session_service=self.session_service,
-        )
-        self.http_app = App(
-            name=self.settings.app_name,
-            root_agent=build_root_agent(
-                self.settings,
-                model_name=registry.active.model,
-                enable_bash=False,
+        return RunnerBundle(
+            app=app,
+            runner=Runner(
+                app=app,
+                session_service=self.session_service,
             ),
-            resumability_config=ResumabilityConfig(is_resumable=True),
-        )
-        self.http_runner = Runner(
-            app=self.http_app,
-            session_service=self.session_service,
         )
 
 

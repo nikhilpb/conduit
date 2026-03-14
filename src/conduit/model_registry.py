@@ -41,6 +41,12 @@ class ModelRegistry:
                 return ModelRegistry(active_key=active_key, options=self.options)
         raise KeyError(f"Unknown model key: {active_key}")
 
+    def get(self, model_key: str) -> ModelOption:
+        for option in self.options:
+            if option.key == model_key:
+                return option
+        raise KeyError(f"Unknown model key: {model_key}")
+
     def to_payload(self) -> dict[str, object]:
         return {
             "active": self.active_key,

@@ -106,4 +106,18 @@ void main() {
       expect(detail.messages[2].messageId, 'assistant-reply');
     },
   );
+
+  test('scheduled session metadata is parsed from API responses', () {
+    final detail = SessionDetail.fromJson({
+      'session_id': 'scheduled-1',
+      'kind': 'scheduled',
+      'read_only': true,
+      'messages': const [],
+      'context_estimate': {'chars': 0, 'tokens': 0, 'chars_per_token': 4.0},
+    });
+
+    expect(detail.kind, 'scheduled');
+    expect(detail.readOnly, isTrue);
+    expect(detail.isScheduled, isTrue);
+  });
 }

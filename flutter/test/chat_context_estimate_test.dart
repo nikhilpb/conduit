@@ -30,6 +30,8 @@ void main() {
       ),
       sessionDetail: SessionDetail(
         sessionId: 'session-1',
+        kind: 'interactive',
+        readOnly: false,
         messages: const [],
         contextEstimate: _contextEstimate(400),
       ),
@@ -83,6 +85,8 @@ void main() {
         ),
         sessionDetail: SessionDetail(
           sessionId: 'session-1',
+          kind: 'interactive',
+          readOnly: false,
           messages: const [],
           contextEstimate: _contextEstimate(200),
         ),

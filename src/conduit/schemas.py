@@ -39,6 +39,8 @@ class SessionResponse(BaseModel):
     last_update_time: float
     event_count: int
     title: str
+    kind: str = "interactive"
+    read_only: bool = False
 
 
 class SessionListResponse(BaseModel):
@@ -69,6 +71,8 @@ class TranscriptMessage(BaseModel):
 
 class SessionDetailResponse(BaseModel):
     session_id: str
+    kind: str = "interactive"
+    read_only: bool = False
     messages: list[TranscriptMessage] = Field(default_factory=list)
     context_estimate: ContextEstimateResponse = Field(
         default_factory=_default_context_estimate_response

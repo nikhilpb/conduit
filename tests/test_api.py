@@ -12,6 +12,7 @@ from conduit.context_estimate import build_context_estimate
 from conduit.main import _build_transcript
 from conduit.main import create_app
 from conduit.runtime import TurnResult
+from conduit.session_metadata import build_scheduled_session_state
 from conduit.user_context import CURRENT_TIME_STATE_KEY
 from conduit.user_context import LOCATION_STATE_KEY
 from conduit.user_context import PERSONAL_INSTRUCTIONS_STATE_KEY
@@ -62,11 +63,15 @@ def test_create_and_list_sessions(tmp_path):
     assert list_response.json()["sessions"][0]["session_id"] == session_id
     assert list_response.json()["sessions"][0]["event_count"] == 0
     assert list_response.json()["sessions"][0]["title"] == f"Session {session_id[:8]}"
+    assert list_response.json()["sessions"][0]["kind"] == "interactive"
+    assert list_response.json()["sessions"][0]["read_only"] is False
 
     detail_response = client.get(f"/sessions/{session_id}")
     assert detail_response.status_code == 200
     assert detail_response.json() == {
         "session_id": session_id,
+        "kind": "interactive",
+        "read_only": False,
         "messages": [],
         "context_estimate": {
             "chars": 0,
@@ -123,8 +128,99 @@ def test_list_sessions_uses_first_user_message_as_title(tmp_path):
             "last_update_time": response.json()["sessions"][0]["last_update_time"],
             "event_count": 2,
             "title": "Tell me about Swiss trains in Zurich.",
+            "kind": "interactive",
+            "read_only": False,
         }
     ]
+
+
+def test_scheduled_sessions_are_exposed_as_read_only(tmp_path):
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+        )
+    )
+    runtime = app.state.runtime
+    session = runtime.session_service._create_session_sync(  # noqa: SLF001
+        app_name=runtime.settings.app_name,
+        user_id=runtime.settings.internal_user_id,
+        session_id="scheduled-1",
+        state=build_scheduled_session_state(
+            schedule_id="daily-brief",
+            scheduled_for="2026-03-14T08:00:00+01:00",
+            model_key="claude_sonnet_4_6",
+            allowed_tools=("web_search", "web_fetch"),
+        ),
+    )
+    runtime.session_service._append_event_sync(  # noqa: SLF001
+        session=session,
+        event=Event(
+            invocation_id="inv-user",
+            author="user",
+            content=types.Content(
+                role="user",
+                parts=[types.Part(text="Scheduled question")],
+            ),
+        ),
+    )
+    runtime.session_service._append_event_sync(  # noqa: SLF001
+        session=session,
+        event=Event(
+            invocation_id="inv-model",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text="Scheduled answer")],
+            ),
+        ),
+    )
+    client = TestClient(app)
+
+    list_response = client.get("/sessions")
+    assert list_response.status_code == 200
+    assert list_response.json()["sessions"][0]["kind"] == "scheduled"
+    assert list_response.json()["sessions"][0]["read_only"] is True
+
+    detail_response = client.get("/sessions/scheduled-1")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["kind"] == "scheduled"
+    assert detail_response.json()["read_only"] is True
+
+
+def test_chat_rejects_read_only_sessions(tmp_path):
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+        )
+    )
+    runtime = app.state.runtime
+    runtime.session_service._create_session_sync(  # noqa: SLF001
+        app_name=runtime.settings.app_name,
+        user_id=runtime.settings.internal_user_id,
+        session_id="scheduled-1",
+        state=build_scheduled_session_state(
+            schedule_id="daily-brief",
+            scheduled_for="2026-03-14T08:00:00+01:00",
+            model_key="claude_sonnet_4_6",
+            allowed_tools=("web_search",),
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/chat",
+        json={
+            "session_id": "scheduled-1",
+            "message": "Continue this conversation",
+        },
+    )
+
+    assert response.status_code == 409
+    assert "read-only" in response.json()["detail"]
 
 
 def test_model_settings_can_be_listed_and_updated(tmp_path):

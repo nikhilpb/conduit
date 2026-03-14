@@ -12,6 +12,7 @@ from conduit.config import Settings
 from conduit.context_estimate import estimate_events_context
 from conduit.context_estimate import estimate_tool_result_chars
 from conduit.main import create_app
+from conduit.session_metadata import build_scheduled_session_state
 from conduit.sessions import SQLiteSessionService
 from conduit.websocket_chat import WebSocketChatManager
 
@@ -64,6 +65,9 @@ class FakeRuntime:
         if session is not None:
             return session
         return await self.create_session(session_id=session_id)
+
+    async def get_or_create_writable_session(self, session_id: str | None = None):
+        return await self.get_or_create_session(session_id)
 
     def create_invocation_id(self) -> str:
         return "inv-test"
@@ -192,6 +196,43 @@ def test_websocket_turn_streams_ack_tool_calls_tokens_and_done(tmp_path):
     assert events[-1]["type"] == "done"
     assert events[-1]["context_estimate"]["chars"] > 0
     assert runtime.iter_event_calls == 1
+
+
+def test_websocket_rejects_read_only_sessions(tmp_path):
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+        )
+    )
+    runtime = app.state.runtime
+    runtime.session_service._create_session_sync(  # noqa: SLF001
+        app_name=runtime.settings.app_name,
+        user_id=runtime.settings.internal_user_id,
+        session_id="scheduled-1",
+        state=build_scheduled_session_state(
+            schedule_id="daily-brief",
+            scheduled_for="2026-03-14T08:00:00+01:00",
+            model_key="claude_sonnet_4_6",
+            allowed_tools=("web_search",),
+        ),
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/chat") as websocket:
+        websocket.send_json(
+            {
+                "type": "text",
+                "session_id": "scheduled-1",
+                "message_id": "m1",
+                "content": "Continue this conversation",
+            }
+        )
+        event = websocket.receive_json()
+
+    assert event["type"] == "error"
+    assert "read-only" in event["message"]
 
 
 def test_websocket_turn_passes_context_into_runtime_state(tmp_path):

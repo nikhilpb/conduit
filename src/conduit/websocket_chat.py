@@ -17,6 +17,7 @@ from google.genai import types
 
 from conduit.context_estimate import estimate_tool_result_chars
 from conduit.runtime import ConduitRuntime
+from conduit.runtime import ReadOnlySessionError
 from conduit.sessions.sqlite_service import ClientTurnRecord
 from conduit.tool_permissions import permission_summary
 from conduit.tool_call_utils import public_tool_response
@@ -161,7 +162,16 @@ class WebSocketChatManager:
         if not content:
             raise ValueError("content must be a non-empty string")
 
-        session = await self.runtime.get_or_create_session(session_id)
+        try:
+            session = await self.runtime.get_or_create_writable_session(session_id)
+        except ReadOnlySessionError as exc:
+            await queue.put(
+                {
+                    "type": "error",
+                    "message": str(exc),
+                }
+            )
+            return
         existing = await self.runtime.session_service.get_client_turn(
             app_name=self.runtime.settings.app_name,
             user_id=self.runtime.settings.internal_user_id,

@@ -1,3 +1,7 @@
+import asyncio
+from types import SimpleNamespace
+
+from conduit.agent import available_tool_names
 from conduit.agent import build_root_agent
 from conduit.config import Settings
 from conduit.runtime import ConduitRuntime
@@ -85,6 +89,55 @@ def test_build_root_agent_can_disable_bash():
 
     assert "bash" not in tool_names
     assert "Use bash when you need to inspect" not in agent.instruction
+
+
+def test_build_root_agent_can_filter_tools():
+    agent = build_root_agent(
+        Settings(_env_file=None),
+        model_name="claude-sonnet-4-6",
+        enable_bash=False,
+        allowed_tools={"web_fetch"},
+    )
+
+    tool_names = [
+        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
+        for tool in agent.tools
+    ]
+
+    assert tool_names == ["web_fetch"]
+    assert "Use web_fetch" in agent.instruction
+    assert "Use web_search" not in agent.instruction
+
+
+def test_available_tool_names_excludes_recipe_lookup_without_catalog(tmp_path):
+    tool_names = available_tool_names(
+        Settings(
+            _env_file=None,
+            recipe_catalog_config_path=str(tmp_path / "missing-recipes.yaml"),
+        )
+    )
+
+    assert "web_search" in tool_names
+    assert "recipe_lookup" not in tool_names
+
+
+def test_noninteractive_agent_rejects_confirmation_gated_tools():
+    agent = build_root_agent(
+        Settings(_env_file=None),
+        model_name="claude-sonnet-4-6",
+        allowed_tools={"bash"},
+        allow_tool_confirmation=False,
+    )
+
+    result = asyncio.run(
+        agent.before_tool_callback(
+            tool=SimpleNamespace(name="bash"),
+            args={"command": "echo hello"},
+            tool_context=SimpleNamespace(tool_confirmation=None),
+        )
+    )
+
+    assert "cannot be used in non-interactive scheduled sessions" in result["error"]
 
 
 def test_runtime_uses_bash_only_for_websocket_runner(tmp_path):

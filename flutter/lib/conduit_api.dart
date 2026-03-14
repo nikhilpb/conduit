@@ -12,14 +12,17 @@ class ConduitApiClient {
     required String baseUrl,
     http.Client? httpClient,
     WebSocketChannelFactory? webSocketChannelFactory,
+    ConduitChatSocket Function()? chatSocketFactory,
   }) : _baseUrl = _normalizeBaseUrl(baseUrl),
        _httpClient = httpClient ?? http.Client(),
        _webSocketChannelFactory =
-           webSocketChannelFactory ?? WebSocketChannel.connect;
+           webSocketChannelFactory ?? WebSocketChannel.connect,
+       _chatSocketFactory = chatSocketFactory;
 
   final String _baseUrl;
   final http.Client _httpClient;
   final WebSocketChannelFactory _webSocketChannelFactory;
+  final ConduitChatSocket Function()? _chatSocketFactory;
 
   Future<HealthStatus> health() async {
     final response = await _httpClient.get(_uri('/health'));
@@ -84,6 +87,9 @@ class ConduitApiClient {
   }
 
   ConduitChatSocket createChatSocket() {
+    if (_chatSocketFactory != null) {
+      return _chatSocketFactory();
+    }
     return ConduitChatSocket._(
       _webSocketChannelFactory(_webSocketUri('/chat')),
     );
