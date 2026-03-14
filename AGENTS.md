@@ -153,6 +153,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `uv run conduit-api`
 - Backend tests:
   - `uv run pytest`
+  - Pytest uses `tests/conftest.py` to point `CONDUIT_SCHEDULED_SESSIONS_CONFIG_PATH` at an empty temp file by default; scheduled-session tests opt into explicit configs when needed.
 - In-container Codex:
   - `docker compose exec -w /workspace conduit-api codex`
 - GitHub PR checks:
