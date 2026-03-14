@@ -121,13 +121,15 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `ANTHROPIC_API_KEY`
   - `GOOGLE_API_KEY` or `GEMINI_API_KEY`
   - `BRAVE_API_KEY`
+  - `OPENAI_API_KEY` for the in-container Codex CLI only; the backend does not use it for model routing
 - Important paths:
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`
   - recipe catalog config: `config/recipes.yaml`
   - tool permissions: `config/tools.yaml`
+  - Codex workspace mount in Docker: `/workspace`
 - Default backend bind: `0.0.0.0:18423`
-- Docker Compose mounts `./data` and `./config` into the container and publishes `18423`.
+- Docker Compose mounts the repo root at `/workspace`, plus `./data` and `./config`, and publishes `18423`.
 
 ## ADK Web
 
@@ -141,6 +143,8 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `uv run conduit-api`
 - Backend tests:
   - `uv run pytest`
+- In-container Codex:
+  - `docker compose exec -w /workspace conduit-api codex`
 - GitHub PR checks:
   - backend: `uv sync --locked --dev`, `uv run pytest`, `docker build .`
   - client: `flutter pub get`, `flutter analyze`, `flutter test`, `flutter build apk --debug`

@@ -37,6 +37,8 @@ See [DESIGN.md](DESIGN.md) for the full design document.
    cp .env.example .env
    # Edit .env with your API keys:
    #   ANTHROPIC_API_KEY, GOOGLE_API_KEY, BRAVE_API_KEY
+   # Optional for in-container Codex CLI billing:
+   #   OPENAI_API_KEY
    ```
 
 2. To bind the server to a Tailscale IP (recommended for production), set `CONDUIT_PUBLISH_IP` in `.env`:
@@ -61,16 +63,33 @@ See [DESIGN.md](DESIGN.md) for the full design document.
 
 ### Data and Configuration
 
-Docker Compose mounts two host directories into the container:
+Docker Compose mounts three host paths into the container:
 
 | Host Path | Container Path | Purpose |
 |-----------|---------------|---------|
+| `.`       | `/workspace`  | Live repo workspace for in-container `codex` runs |
 | `./data`  | `/app/data`   | SQLite database (`conduit.db`) |
 | `./config`| `/app/config` | Model config (`models.yaml`), tool permissions (`tools.yaml`) |
 
 Both persist across container rebuilds.
 
 `config/tools.yaml` controls per-tool permissions. The `bash` tool is always approval-gated even if it is configured as `allow`.
+
+### Codex in the Container
+
+The default backend image now includes the OpenAI Codex CLI. After:
+
+```bash
+docker compose up -d --build
+```
+
+you can open Codex inside the running backend container against the live checkout mounted at `/workspace`:
+
+```bash
+docker compose exec -w /workspace conduit-api codex
+```
+
+`OPENAI_API_KEY` is optional and is used only for Codex CLI usage-based billing inside the container. Conduit itself does not use that key for model selection or API requests.
 
 ### Running without Docker
 
@@ -134,6 +153,7 @@ uv run adk web adk_agents --host 127.0.0.1 --port 4201
 | `ANTHROPIC_API_KEY` | Claude API access | — |
 | `GOOGLE_API_KEY` | Gemini API access | — |
 | `BRAVE_API_KEY` | Web search (Brave) | — |
+| `OPENAI_API_KEY` | In-container Codex CLI billing/auth only | — |
 | `CONDUIT_PUBLISH_IP` | Docker host-side bind IP | `127.0.0.1` |
 | `CONDUIT_HOST` | Server bind address | `0.0.0.0` |
 | `CONDUIT_PORT` | Server port | `18423` |
