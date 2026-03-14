@@ -12,9 +12,11 @@ services:
       CONDUIT_DB_PATH: /app/data/conduit.db
       CONDUIT_MODELS_CONFIG_PATH: /app/config/models.yaml
       CONDUIT_TOOL_PERMISSIONS_PATH: /app/config/tools.yaml
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "${CONDUIT_PUBLISH_IP:-127.0.0.1}:18423:18423"
     volumes:
+      - .:/workspace
       - ./data:/app/data
       - ./config:/app/config
     healthcheck:
