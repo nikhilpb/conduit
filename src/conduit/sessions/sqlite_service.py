@@ -46,6 +46,14 @@ class SessionSummaryRecord:
     last_update_time: float
     event_count: int
     title: str
+    session_kind: str
+    scheduled_job_id: str | None
+
+
+@dataclass(slots=True)
+class SessionMetadataRecord:
+    session_kind: str
+    scheduled_job_id: str | None
 
 
 class SQLiteSessionService(BaseSessionService):
@@ -65,6 +73,8 @@ class SQLiteSessionService(BaseSessionService):
         user_id: str,
         state: Optional[dict[str, Any]] = None,
         session_id: Optional[str] = None,
+        session_kind: str = "interactive",
+        scheduled_job_id: str | None = None,
     ) -> Session:
         async with self._write_lock:
             return await asyncio.to_thread(
@@ -73,6 +83,8 @@ class SQLiteSessionService(BaseSessionService):
                 user_id=user_id,
                 state=state,
                 session_id=session_id,
+                session_kind=session_kind,
+                scheduled_job_id=scheduled_job_id,
             )
 
     @override
@@ -145,6 +157,8 @@ class SQLiteSessionService(BaseSessionService):
                     user_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     state_json TEXT NOT NULL,
+                    session_kind TEXT NOT NULL DEFAULT 'interactive',
+                    scheduled_job_id TEXT,
                     last_update_time REAL NOT NULL,
                     PRIMARY KEY (app_name, user_id, session_id)
                 );
@@ -202,6 +216,7 @@ class SQLiteSessionService(BaseSessionService):
                 );
                 """
             )
+            self._ensure_session_columns(connection)
 
     def _create_session_sync(
         self,
@@ -210,7 +225,16 @@ class SQLiteSessionService(BaseSessionService):
         user_id: str,
         state: Optional[dict[str, Any]] = None,
         session_id: Optional[str] = None,
+        session_kind: str = "interactive",
+        scheduled_job_id: str | None = None,
     ) -> Session:
+        if session_kind not in {"interactive", "scheduled"}:
+            raise ValueError(f"unsupported session_kind: {session_kind}")
+        if session_kind == "interactive":
+            scheduled_job_id = None
+        elif not scheduled_job_id:
+            raise ValueError("scheduled sessions require scheduled_job_id")
+
         normalized_session_id = (
             session_id.strip()
             if session_id and session_id.strip()
@@ -249,14 +273,18 @@ class SQLiteSessionService(BaseSessionService):
                     user_id,
                     session_id,
                     state_json,
+                    session_kind,
+                    scheduled_job_id,
                     last_update_time
-                ) VALUES (?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     app_name,
                     user_id,
                     normalized_session_id,
                     json.dumps(session_state),
+                    session_kind,
+                    scheduled_job_id,
                     now,
                 ),
             )
@@ -546,6 +574,26 @@ class SQLiteSessionService(BaseSessionService):
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    def _ensure_session_columns(self, connection: sqlite3.Connection) -> None:
+        session_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        if "session_kind" not in session_columns:
+            connection.execute(
+                """
+                ALTER TABLE sessions
+                ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'interactive'
+                """
+            )
+        if "scheduled_job_id" not in session_columns:
+            connection.execute(
+                """
+                ALTER TABLE sessions
+                ADD COLUMN scheduled_job_id TEXT
+                """
+            )
+
     def _get_session_summaries_sync(
         self,
         *,
@@ -558,6 +606,8 @@ class SQLiteSessionService(BaseSessionService):
                 SELECT
                     s.session_id,
                     s.last_update_time,
+                    s.session_kind,
+                    s.scheduled_job_id,
                     COUNT(e.event_id) AS event_count
                 FROM sessions AS s
                 LEFT JOIN events AS e
@@ -565,7 +615,11 @@ class SQLiteSessionService(BaseSessionService):
                     AND e.user_id = s.user_id
                     AND e.session_id = s.session_id
                 WHERE s.app_name = ? AND s.user_id = ?
-                GROUP BY s.session_id, s.last_update_time
+                GROUP BY
+                    s.session_id,
+                    s.last_update_time,
+                    s.session_kind,
+                    s.scheduled_job_id
                 ORDER BY s.last_update_time DESC
                 """,
                 (app_name, user_id),
@@ -582,6 +636,8 @@ class SQLiteSessionService(BaseSessionService):
                         user_id=user_id,
                         session_id=row["session_id"],
                     ),
+                    session_kind=row["session_kind"],
+                    scheduled_job_id=row["scheduled_job_id"],
                 )
                 for row in rows
             ]
@@ -712,6 +768,20 @@ class SQLiteSessionService(BaseSessionService):
             user_id=user_id,
         )
 
+    async def get_session_metadata(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        session_id: str,
+    ) -> SessionMetadataRecord | None:
+        return await asyncio.to_thread(
+            self._get_session_metadata_sync,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
     def _get_client_turn_sync(
         self,
         *,
@@ -745,6 +815,31 @@ class SQLiteSessionService(BaseSessionService):
             error_message=row["error_message"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+        )
+
+    def _get_session_metadata_sync(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        session_id: str,
+    ) -> SessionMetadataRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT session_kind, scheduled_job_id
+                FROM sessions
+                WHERE app_name = ? AND user_id = ? AND session_id = ?
+                """,
+                (app_name, user_id, session_id),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return SessionMetadataRecord(
+            session_kind=row["session_kind"],
+            scheduled_job_id=row["scheduled_job_id"],
         )
 
     def _save_client_turn_started_sync(

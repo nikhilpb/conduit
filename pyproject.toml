@@ -9,6 +9,7 @@ description = "Single-user ADK assistant with a FastAPI gateway."
 readme = "DESIGN.md"
 requires-python = ">=3.11"
 dependencies = [
+  "apscheduler>=3.11,<4",
   "anthropic>=0.54,<1",
   "beautifulsoup4>=4.13.5,<5",
   "fastapi==0.135.1",

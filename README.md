@@ -19,6 +19,7 @@ Android (Flutter)  ──WebSocket──▶  FastAPI :18423  ──▶  Google A
 - **Deployment:** Docker Compose, Tailscale-only access on port `18423`.
 - **Models:** Claude Opus 4.6, Claude Sonnet 4.6, Gemini 3 Flash, Gemini 3.1 Pro — switchable at runtime via `config/models.yaml`.
 - **Built-in tools:** `web_search`, `web_fetch`, `bash` (host command execution with mandatory approval), and public Polymarket market lookup/price-history tools.
+- **Scheduled sessions:** Optional headless sessions can be configured in `config/scheduled_sessions.yaml` with a cron schedule, raw model name, seed query, and per-job allowed tools.
 
 See [DESIGN.md](DESIGN.md) for the full design document.
 
@@ -66,11 +67,13 @@ Docker Compose mounts two host directories into the container:
 | Host Path | Container Path | Purpose |
 |-----------|---------------|---------|
 | `./data`  | `/app/data`   | SQLite database (`conduit.db`) |
-| `./config`| `/app/config` | Model config (`models.yaml`), tool permissions (`tools.yaml`) |
+| `./config`| `/app/config` | Model config (`models.yaml`), tool permissions (`tools.yaml`), scheduled sessions (`scheduled_sessions.yaml`) |
 
 Both persist across container rebuilds.
 
 `config/tools.yaml` controls per-tool permissions. The `bash` tool is always approval-gated even if it is configured as `allow`.
+
+`config/scheduled_sessions.yaml` configures optional headless scheduled runs. Each entry defines `id`, `schedule` (5-field cron in the backend process timezone), `model`, `seed_query`, and `allowed_tools`. Each trigger creates a fresh scheduled session in the main SQLite session history.
 
 ### Running without Docker
 

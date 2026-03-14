@@ -1,3 +1,6 @@
+import asyncio
+from types import SimpleNamespace
+
 from conduit.agent import build_root_agent
 from conduit.config import Settings
 from conduit.runtime import ConduitRuntime
@@ -107,3 +110,68 @@ def test_runtime_uses_bash_only_for_websocket_runner(tmp_path):
 
     assert "bash" in websocket_tool_names
     assert "bash" not in http_tool_names
+
+
+def test_build_root_agent_can_limit_tools_and_auto_approve_bash():
+    agent = build_root_agent(
+        Settings(_env_file=None),
+        model_name="claude-sonnet-4-6",
+        allowed_tools=("bash", "web_fetch"),
+        auto_approve_tools=True,
+    )
+
+    tool_names = [
+        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
+        for tool in agent.tools
+    ]
+
+    assert tool_names == ["web_fetch", "bash"]
+    assert "requires explicit user confirmation" not in agent.instruction
+
+    callback_result = asyncio.run(
+        agent.before_tool_callback(
+            tool=SimpleNamespace(name="bash"),
+            args={"command": "pwd"},
+            tool_context=SimpleNamespace(
+                tool_confirmation=None,
+                actions=SimpleNamespace(skip_summarization=False),
+            ),
+        )
+    )
+    assert callback_result is None
+
+
+def test_runtime_builds_scheduled_runner_with_raw_model_and_allowlist(tmp_path):
+    scheduled_config_path = tmp_path / "scheduled_sessions.yaml"
+    scheduled_config_path.write_text(
+        """
+scheduled_sessions:
+  - id: daily-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Summarize the day.
+    allowed_tools:
+      - bash
+      - web_fetch
+"""
+    )
+
+    runtime = ConduitRuntime(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=str(scheduled_config_path),
+        )
+    )
+
+    scheduled_runtime = runtime.scheduled_session_runtimes["daily-briefing"]
+    tool_names = [
+        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
+        for tool in scheduled_runtime.app.root_agent.tools
+    ]
+
+    assert scheduled_runtime.definition.model == "gemini-3-flash-preview"
+    assert scheduled_runtime.app.root_agent.model == "gemini-3-flash-preview"
+    assert tool_names == ["web_fetch", "bash"]

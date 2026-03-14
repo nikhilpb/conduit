@@ -62,11 +62,15 @@ def test_create_and_list_sessions(tmp_path):
     assert list_response.json()["sessions"][0]["session_id"] == session_id
     assert list_response.json()["sessions"][0]["event_count"] == 0
     assert list_response.json()["sessions"][0]["title"] == f"Session {session_id[:8]}"
+    assert list_response.json()["sessions"][0]["session_kind"] == "interactive"
+    assert list_response.json()["sessions"][0]["scheduled_job_id"] is None
 
     detail_response = client.get(f"/sessions/{session_id}")
     assert detail_response.status_code == 200
     assert detail_response.json() == {
         "session_id": session_id,
+        "session_kind": "interactive",
+        "scheduled_job_id": None,
         "messages": [],
         "context_estimate": {
             "chars": 0,
@@ -123,6 +127,8 @@ def test_list_sessions_uses_first_user_message_as_title(tmp_path):
             "last_update_time": response.json()["sessions"][0]["last_update_time"],
             "event_count": 2,
             "title": "Tell me about Swiss trains in Zurich.",
+            "session_kind": "interactive",
+            "scheduled_job_id": None,
         }
     ]
 
@@ -224,6 +230,87 @@ def test_chat_passes_turn_context_into_runtime_state(tmp_path):
         "tokens": 11,
         "chars_per_token": 4.0,
     }
+
+
+def test_scheduled_session_runs_appear_in_session_apis(tmp_path):
+    scheduled_config_path = tmp_path / "scheduled_sessions.yaml"
+    scheduled_config_path.write_text(
+        """
+scheduled_sessions:
+  - id: daily-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Summarize the morning news.
+    allowed_tools:
+      - web_fetch
+"""
+    )
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=str(scheduled_config_path),
+        )
+    )
+    runtime = app.state.runtime
+
+    async def fake_iter_events(
+        *,
+        session,
+        new_message,
+        invocation_id: str | None = None,
+        state_delta=None,
+        runner=None,
+    ):
+        del invocation_id, runner, state_delta
+        user_event = Event(
+            invocation_id="inv-user",
+            author="user",
+            content=new_message,
+        )
+        await runtime.session_service.append_event(session, user_event)
+        yield user_event
+
+        assistant_event = Event(
+            invocation_id="inv-assistant",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text="Scheduled reply.")],
+            ),
+        )
+        await runtime.session_service.append_event(session, assistant_event)
+        yield assistant_event
+
+    runtime.iter_events = fake_iter_events  # type: ignore[method-assign]
+
+    result = asyncio.run(runtime.run_scheduled_session("daily-briefing"))
+
+    client = TestClient(app)
+    list_response = client.get("/sessions")
+
+    assert result.reply == "Scheduled reply."
+    assert list_response.status_code == 200
+    assert list_response.json()["sessions"] == [
+        {
+            "session_id": result.session_id,
+            "last_update_time": list_response.json()["sessions"][0]["last_update_time"],
+            "event_count": 2,
+            "title": "Summarize the morning news.",
+            "session_kind": "scheduled",
+            "scheduled_job_id": "daily-briefing",
+        }
+    ]
+
+    detail_response = client.get(f"/sessions/{result.session_id}")
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["session_kind"] == "scheduled"
+    assert detail_response.json()["scheduled_job_id"] == "daily-briefing"
+    assert detail_response.json()["messages"][0]["text"] == "Summarize the morning news."
+    assert detail_response.json()["messages"][1]["text"] == "Scheduled reply."
 
 
 def test_build_transcript_includes_thinking_trace():

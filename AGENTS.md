@@ -26,6 +26,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `recipe_lookup`: read-only lookup against a local `recipes.json` catalog when `config/recipes.yaml` resolves to an existing file.
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
+- Headless scheduled sessions can be configured on the backend via `config/scheduled_sessions.yaml`; each scheduled run uses its configured raw model name, cron schedule, seed query, and allowed tool list.
 - Supported base models:
   - `Claude Opus 4.6`
   - `Claude Sonnet 4.6`
@@ -61,6 +62,9 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Persists ADK sessions/events plus `client_turns` for websocket replay/idempotency.
 - `src/conduit/model_registry.py`
   - Loads/persists model options and active model from `config/models.yaml`.
+- `src/conduit/scheduled_sessions.py`
+  - Loads/validates `config/scheduled_sessions.yaml`.
+  - Runs configured scheduled sessions through an in-process APScheduler service.
 - `src/conduit/user_context.py`
   - Converts client context into ADK state delta and hidden model instructions.
 - `src/conduit/context_estimate.py`
@@ -94,6 +98,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 ## Implemented UX/Protocol Decisions
 
 - Sessions are lazy-created from the first sent message; opening “New session” alone does not create one.
+- Scheduled runs create a fresh session per trigger and store the seed query as the first normal user event.
 - Session title is derived from the first user message.
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.
@@ -101,8 +106,10 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - The Flutter client hides internal `adk_request_confirmation` transcript items entirely once their hidden tool calls are stripped; approvals only appear through the dedicated approval UI.
 - Standalone tool-call transcript items render as chips without an enclosing chat bubble; `bash` chips are labeled as `Bash(<truncated command>)`.
 - Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
+- Session records now include `session_kind` (`interactive` or `scheduled`) and an optional `scheduled_job_id`.
 - `bash` tool results now preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, but the Flutter client no longer renders inline bash output; it keeps a single bash invocation chip in history and in live turns.
 - The websocket/interactive chat runner exposes `bash`; the plain HTTP `/chat` runner intentionally excludes `bash` because that surface cannot complete approval handshakes.
+- Scheduled runners are separate headless ADK runners: they use only their configured `allowed_tools` list and auto-approve those tools, including `bash`.
 - Chat composer shows the currently active model label.
 - Chat composer now shows an estimated next-turn context token count and a soft usage bar based on completed session history, the current draft, and hidden per-turn context.
 - `/health` exposes `context_chars_per_token`; session detail / HTTP chat responses expose `context_estimate`; websocket `tool_result` events expose `context_chars_delta` and `done` events include an authoritative `context_estimate`.
@@ -124,6 +131,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Important paths:
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`
+  - scheduled session config: `config/scheduled_sessions.yaml`
   - recipe catalog config: `config/recipes.yaml`
   - tool permissions: `config/tools.yaml`
 - Default backend bind: `0.0.0.0:18423`

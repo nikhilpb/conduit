@@ -3,6 +3,7 @@ from google.adk.sessions.base_session_service import GetSessionConfig
 from google.adk.sessions.state import State
 from google.genai import types
 import pytest
+import sqlite3
 
 from conduit.sessions import SQLiteSessionService
 
@@ -85,3 +86,81 @@ async def test_sqlite_session_service_respects_recent_event_filter(tmp_path):
         "message-1",
         "message-2",
     ]
+
+
+@pytest.mark.anyio
+async def test_sqlite_session_service_persists_scheduled_session_metadata(tmp_path):
+    db_path = tmp_path / "conduit.db"
+    service = SQLiteSessionService(str(db_path))
+
+    session = await service.create_session(
+        app_name="conduit",
+        user_id="single-user",
+        session_id="scheduled-1",
+        session_kind="scheduled",
+        scheduled_job_id="daily-briefing",
+    )
+    metadata = await service.get_session_metadata(
+        app_name="conduit",
+        user_id="single-user",
+        session_id=session.id,
+    )
+    summaries = await service.get_session_summaries(
+        app_name="conduit",
+        user_id="single-user",
+    )
+
+    assert metadata is not None
+    assert metadata.session_kind == "scheduled"
+    assert metadata.scheduled_job_id == "daily-briefing"
+    assert summaries == [
+        summaries[0].__class__(
+            session_id="scheduled-1",
+            last_update_time=summaries[0].last_update_time,
+            event_count=0,
+            title="Session schedule",
+            session_kind="scheduled",
+            scheduled_job_id="daily-briefing",
+        )
+    ]
+
+
+def test_sqlite_session_service_migrates_existing_sessions_table(tmp_path):
+    db_path = tmp_path / "conduit.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE sessions (
+                app_name TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                last_update_time REAL NOT NULL,
+                PRIMARY KEY (app_name, user_id, session_id)
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO sessions (
+                app_name,
+                user_id,
+                session_id,
+                state_json,
+                last_update_time
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            ("conduit", "single-user", "legacy-session", "{}", 1.0),
+        )
+
+    service = SQLiteSessionService(str(db_path))
+
+    metadata = service._get_session_metadata_sync(  # noqa: SLF001
+        app_name="conduit",
+        user_id="single-user",
+        session_id="legacy-session",
+    )
+
+    assert metadata is not None
+    assert metadata.session_kind == "interactive"
+    assert metadata.scheduled_job_id is None
