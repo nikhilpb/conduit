@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from google.adk.sessions.state import State
@@ -42,6 +43,18 @@ def build_state_delta(context: TurnContext | None) -> dict[str, Any]:
             context.personal_instructions.strip()
         )
     return state_delta
+
+
+def build_current_time_state_delta(
+    current_time: datetime | None = None,
+) -> dict[str, str]:
+    """Build a state delta containing the formatted current local time."""
+
+    return {
+        CURRENT_TIME_STATE_KEY: format_current_time(
+            current_time or datetime.now().astimezone()
+        )
+    }
 
 
 def coerce_turn_context(value: Any) -> TurnContext | None:
@@ -98,6 +111,22 @@ def build_context_instructions(state: Any) -> list[str]:
         )
 
     return instructions
+
+
+def format_current_time(current_time: datetime) -> str:
+    """Render a datetime in the same user-facing format as client context."""
+
+    localized_time = current_time.astimezone()
+    utc_offset = localized_time.strftime("%z")
+    if utc_offset:
+        utc_offset = f"{utc_offset[:3]}:{utc_offset[3:]}"
+    else:
+        utc_offset = "+00:00"
+    timezone_name = localized_time.tzname() or "UTC"
+    return (
+        f"{localized_time.strftime('%Y-%m-%d %H:%M:%S')} "
+        f"{timezone_name} (UTC{utc_offset})"
+    )
 
 
 def _safe_get(state: Any, key: str) -> str:

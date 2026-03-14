@@ -178,7 +178,10 @@ class ScheduledSessionScheduler:
             return
 
         try:
-            await self.runtime.run_scheduled_session(job_id)
+            await self.runtime.run_scheduled_session(
+                job_id,
+                current_time=datetime.now(self.timezone),
+            )
         except Exception:  # pragma: no cover - defensive logging
             logger.exception("Scheduled session %s failed.", job_id)
         finally:

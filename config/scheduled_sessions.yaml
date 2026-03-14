@@ -1,1 +1,11 @@
-scheduled_sessions: []
+scheduled_sessions:
+  - id: iran-us-conflict-news
+    schedule: "0 8 * * *"
+    model: claude-sonnet-4-6
+    seed_query: >
+      Find the latest reliable news about the Iran-US conflict today. Summarize the
+      main developments, key actors, and any clear escalation or de-escalation
+      signals with citations to the sources you used.
+    allowed_tools:
+      - web_search
+      - web_fetch

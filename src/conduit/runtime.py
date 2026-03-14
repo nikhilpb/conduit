@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
 from typing import Any
 from typing import AsyncIterator
 from typing import Literal
@@ -33,6 +34,7 @@ from conduit.tool_call_utils import is_internal_tool_call
 from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 from conduit.tool_permissions import effective_tool_permission
+from conduit.user_context import build_current_time_state_delta
 
 
 @dataclass(slots=True)
@@ -305,7 +307,12 @@ class ConduitRuntime:
             runner=self.http_runner,
         )
 
-    async def run_scheduled_session(self, scheduled_job_id: str) -> TurnResult:
+    async def run_scheduled_session(
+        self,
+        scheduled_job_id: str,
+        *,
+        current_time: datetime | None = None,
+    ) -> TurnResult:
         """Run one configured scheduled session headlessly."""
 
         scheduled_runtime = self._scheduled_session_runtimes.get(scheduled_job_id)
@@ -320,6 +327,7 @@ class ConduitRuntime:
             session=session,
             message=scheduled_runtime.definition.seed_query,
             runner=scheduled_runtime.runner,
+            state_delta=build_current_time_state_delta(current_time),
         )
 
     async def _run_session_turn(

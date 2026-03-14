@@ -1,4 +1,7 @@
 import asyncio
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -17,6 +20,12 @@ from conduit.user_context import LOCATION_STATE_KEY
 from conduit.user_context import PERSONAL_INSTRUCTIONS_STATE_KEY
 
 
+def _empty_scheduled_sessions_path(tmp_path) -> str:
+    path = tmp_path / "scheduled_sessions.yaml"
+    path.write_text("scheduled_sessions: []\n")
+    return str(path)
+
+
 def test_health_reports_runtime_configuration(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
@@ -27,6 +36,7 @@ def test_health_reports_runtime_configuration(monkeypatch, tmp_path):
             _env_file=None,
             db_path=str(tmp_path / "conduit.db"),
             models_config_path=str(tmp_path / "models.yaml"),
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
         )
     )
     client = TestClient(app)
@@ -48,6 +58,7 @@ def test_create_and_list_sessions(tmp_path):
             _env_file=None,
             db_path=str(tmp_path / "conduit.db"),
             models_config_path=str(tmp_path / "models.yaml"),
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
         )
     )
     client = TestClient(app)
@@ -86,6 +97,7 @@ def test_list_sessions_uses_first_user_message_as_title(tmp_path):
             _env_file=None,
             db_path=str(tmp_path / "conduit.db"),
             models_config_path=str(tmp_path / "models.yaml"),
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
         )
     )
     runtime = app.state.runtime
@@ -141,6 +153,7 @@ def test_model_settings_can_be_listed_and_updated(tmp_path):
             models_config_path=str(tmp_path / "models.yaml"),
             anthropic_api_key="anthropic-test",
             google_api_key="google-test",
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
         )
     )
     client = TestClient(app)
@@ -183,6 +196,7 @@ def test_chat_passes_turn_context_into_runtime_state(tmp_path):
             _env_file=None,
             db_path=str(tmp_path / "conduit.db"),
             models_config_path=str(tmp_path / "models.yaml"),
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
         )
     )
     captured: dict[str, object] = {}
@@ -256,6 +270,8 @@ scheduled_sessions:
     )
     runtime = app.state.runtime
 
+    captured_state_delta: dict[str, object] = {}
+
     async def fake_iter_events(
         *,
         session,
@@ -264,7 +280,8 @@ scheduled_sessions:
         state_delta=None,
         runner=None,
     ):
-        del invocation_id, runner, state_delta
+        del invocation_id, runner
+        captured_state_delta.update(dict(state_delta or {}))
         user_event = Event(
             invocation_id="inv-user",
             author="user",
@@ -285,13 +302,30 @@ scheduled_sessions:
         yield assistant_event
 
     runtime.iter_events = fake_iter_events  # type: ignore[method-assign]
+    scheduled_time = datetime(
+        2026,
+        3,
+        10,
+        8,
+        0,
+        0,
+        tzinfo=timezone(timedelta(hours=1), name="CET"),
+    )
 
-    result = asyncio.run(runtime.run_scheduled_session("daily-briefing"))
+    result = asyncio.run(
+        runtime.run_scheduled_session(
+            "daily-briefing",
+            current_time=scheduled_time,
+        )
+    )
 
     client = TestClient(app)
     list_response = client.get("/sessions")
 
     assert result.reply == "Scheduled reply."
+    assert captured_state_delta == {
+        CURRENT_TIME_STATE_KEY: "2026-03-10 08:00:00 CET (UTC+01:00)"
+    }
     assert list_response.status_code == 200
     assert list_response.json()["sessions"] == [
         {

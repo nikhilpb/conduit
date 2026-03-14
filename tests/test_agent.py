@@ -6,6 +6,12 @@ from conduit.config import Settings
 from conduit.runtime import ConduitRuntime
 
 
+def _empty_scheduled_sessions_path(tmp_path) -> str:
+    path = tmp_path / "scheduled_sessions.yaml"
+    path.write_text("scheduled_sessions: []\n")
+    return str(path)
+
+
 def test_build_root_agent_includes_registered_tools():
     agent = build_root_agent(
         Settings(_env_file=None),
@@ -96,6 +102,7 @@ def test_runtime_uses_bash_only_for_websocket_runner(tmp_path):
             _env_file=None,
             db_path=str(tmp_path / "conduit.db"),
             models_config_path=str(tmp_path / "models.yaml"),
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
         )
     )
 

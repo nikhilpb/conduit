@@ -27,6 +27,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Headless scheduled sessions can be configured on the backend via `config/scheduled_sessions.yaml`; each scheduled run uses its configured raw model name, cron schedule, seed query, and allowed tool list.
+- The repo default scheduled config currently includes `iran-us-conflict-news`, which runs daily at `08:00` in the backend process timezone using `claude-sonnet-4-6` with `web_search` and `web_fetch`.
 - Supported base models:
   - `Claude Opus 4.6`
   - `Claude Sonnet 4.6`
@@ -99,6 +100,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 
 - Sessions are lazy-created from the first sent message; opening “New session” alone does not create one.
 - Scheduled runs create a fresh session per trigger and store the seed query as the first normal user event.
+- Scheduled runs also inject their scheduler fire time into the same per-turn current-time context channel that interactive turns use.
 - Session title is derived from the first user message.
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.

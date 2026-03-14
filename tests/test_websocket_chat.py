@@ -16,6 +16,12 @@ from conduit.sessions import SQLiteSessionService
 from conduit.websocket_chat import WebSocketChatManager
 
 
+def _empty_scheduled_sessions_path(tmp_path) -> str:
+    path = tmp_path / "scheduled_sessions.yaml"
+    path.write_text("scheduled_sessions: []\n")
+    return str(path)
+
+
 class FakeRuntime:
     def __init__(
         self,
@@ -450,6 +456,7 @@ def _create_websocket_test_app(
         Settings(
             _env_file=None,
             db_path=str(tmp_path / "http-app.db"),
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
         )
     )
     runtime = FakeRuntime(
