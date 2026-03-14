@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-export CODEX_HOME="${CODEX_HOME:-/tmp/codex}"
-export HOME="$CODEX_HOME"
+export HOME="${HOME:-/root}"
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 
 mkdir -p "$CODEX_HOME"
 
