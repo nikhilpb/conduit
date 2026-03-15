@@ -18,6 +18,8 @@ from google.adk.runners import Runner
 from google.adk.sessions.session import Session
 from google.genai import types
 
+import logging
+
 from conduit.agent import build_root_agent
 from conduit.config import Settings
 from conduit.context_estimate import ContextEstimate
@@ -35,6 +37,8 @@ from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 from conduit.tool_permissions import effective_tool_permission
 from conduit.user_context import build_current_time_state_delta
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -319,9 +323,20 @@ class ConduitRuntime:
         if scheduled_runtime is None:
             raise KeyError(f"unknown scheduled session id: {scheduled_job_id}")
 
+        logger.info(
+            "Creating scheduled session for job %r (model=%s, tools=%s)",
+            scheduled_job_id,
+            scheduled_runtime.definition.model,
+            ", ".join(scheduled_runtime.definition.allowed_tools),
+        )
         session = await self.create_session(
             session_kind="scheduled",
             scheduled_job_id=scheduled_job_id,
+        )
+        logger.info(
+            "Created session %s for scheduled job %r, executing seed query.",
+            session.id,
+            scheduled_job_id,
         )
         return await self._run_session_turn(
             session=session,

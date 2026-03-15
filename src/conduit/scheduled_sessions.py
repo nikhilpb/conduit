@@ -67,6 +67,7 @@ def load_scheduled_sessions(
     timezone = scheduled_sessions_timezone()
     definitions: list[ScheduledSessionDefinition] = []
     seen_ids: set[str] = set()
+    logger.info("Loading scheduled sessions from %s", config_path)
 
     for index, raw_definition in enumerate(raw_definitions, start=1):
         if not isinstance(raw_definition, dict):
@@ -115,6 +116,11 @@ def load_scheduled_sessions(
             )
         )
 
+    logger.info(
+        "Loaded %d scheduled session(s): %s",
+        len(definitions),
+        ", ".join(d.id for d in definitions) or "(none)",
+    )
     return tuple(definitions)
 
 
@@ -145,20 +151,29 @@ class ScheduledSessionScheduler:
             return
 
         for definition in self.definitions.values():
+            trigger = CronTrigger.from_crontab(
+                definition.schedule,
+                timezone=self.timezone,
+            )
             self._scheduler.add_job(
                 self.run_job,
-                trigger=CronTrigger.from_crontab(
-                    definition.schedule,
-                    timezone=self.timezone,
-                ),
+                trigger=trigger,
                 id=definition.id,
                 kwargs={"job_id": definition.id},
                 replace_existing=True,
                 max_instances=1,
             )
+            logger.info(
+                "Registered scheduled job %r (schedule=%r, model=%s, next_run=%s)",
+                definition.id,
+                definition.schedule,
+                definition.model,
+                trigger.get_next_fire_time(None, datetime.now(self.timezone)),
+            )
 
         self._scheduler.start()
         self._started = True
+        logger.info("Scheduled session scheduler started with %d job(s).", len(self.definitions))
 
     async def shutdown(self) -> None:
         """Stop the scheduler."""
@@ -166,6 +181,7 @@ class ScheduledSessionScheduler:
         if not self._started:
             return
 
+        logger.info("Shutting down scheduled session scheduler.")
         self._scheduler.shutdown(wait=False)
         self._started = False
 
@@ -178,13 +194,25 @@ class ScheduledSessionScheduler:
             logger.info("Skipping overlapping scheduled session run for %s.", job_id)
             return
 
+        start_time = datetime.now(self.timezone)
+        logger.info("Starting scheduled session run for %r at %s", job_id, start_time.isoformat())
         try:
-            await self.runtime.run_scheduled_session(
+            result = await self.runtime.run_scheduled_session(
                 job_id,
-                current_time=datetime.now(self.timezone),
+                current_time=start_time,
+            )
+            elapsed = (datetime.now(self.timezone) - start_time).total_seconds()
+            logger.info(
+                "Completed scheduled session %r in %.1fs (session_id=%s, reply_len=%d, tool_calls=%d)",
+                job_id,
+                elapsed,
+                result.session_id,
+                len(result.reply),
+                len(result.tool_calls),
             )
         except Exception:  # pragma: no cover - defensive logging
-            logger.exception("Scheduled session %s failed.", job_id)
+            elapsed = (datetime.now(self.timezone) - start_time).total_seconds()
+            logger.exception("Scheduled session %s failed after %.1fs.", job_id, elapsed)
         finally:
             await self._clear_running(job_id)
 
