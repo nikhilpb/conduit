@@ -156,6 +156,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - Flutter run examples:
   - emulator: `flutter run -d android --dart-define=CONDUIT_SERVER_URL=http://10.0.2.2:18423`
   - physical device / VM over Tailscale: `flutter run -d android --dart-define=CONDUIT_SERVER_URL=http://100.x.y.z:18423`
+  - USB debugging does not give a physical Android device access to the host machine's Tailscale routes. If the API is running on the development machine, use `adb reverse tcp:18423 tcp:18423` and point the app at `http://127.0.0.1:18423`; otherwise the phone itself must be on Tailscale or use another reachable network path.
 
 ## Current Gaps Relative To Design
 

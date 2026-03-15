@@ -21,6 +21,8 @@ class ConduitApiClient {
   final http.Client _httpClient;
   final WebSocketChannelFactory _webSocketChannelFactory;
 
+  String get baseUrl => _baseUrl;
+
   Future<HealthStatus> health() async {
     final response = await _httpClient.get(_uri('/health'));
     return HealthStatus.fromJson(_decodeJson(response));

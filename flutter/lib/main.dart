@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'connection_diagnostics.dart';
 import 'context_estimate.dart';
 import 'conduit_api.dart';
 import 'models.dart';
@@ -182,7 +183,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
         return;
       }
       setState(() {
-        _error = '$error';
+        _error = describeConnectionIssue(error, serverUrl: client.baseUrl);
         _loading = false;
       });
     }
@@ -466,7 +467,10 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
       setState(() {
-        _error = '$error';
+        _error = describeConnectionIssue(
+          error,
+          serverUrl: widget.client.baseUrl,
+        );
         _loading = false;
       });
     }
@@ -590,17 +594,32 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     _reconnectTimer?.cancel();
-    final socket = widget.client.createChatSocket();
-    final subscription = socket.events.listen(
-      (event) => _handleChatEvent(socket, event),
-      onError: (Object error, StackTrace stackTrace) {
-        _handleSocketClosed(socket, error: '$error');
-      },
-      onDone: () {
-        _handleSocketClosed(socket);
-      },
-      cancelOnError: false,
-    );
+    late final ConduitChatSocket socket;
+    late final StreamSubscription<ChatServerEvent> subscription;
+    try {
+      socket = widget.client.createChatSocket();
+      subscription = socket.events.listen(
+        (event) => _handleChatEvent(socket, event),
+        onError: (Object error, StackTrace stackTrace) {
+          _handleSocketClosed(
+            socket,
+            error: describeConnectionIssue(
+              error,
+              serverUrl: widget.client.baseUrl,
+            ),
+          );
+        },
+        onDone: () {
+          _handleSocketClosed(socket);
+        },
+        cancelOnError: false,
+      );
+    } catch (error) {
+      _scheduleReconnect(
+        error: describeConnectionIssue(error, serverUrl: widget.client.baseUrl),
+      );
+      return;
+    }
 
     if (!mounted || _disposed) {
       await subscription.cancel();
@@ -679,7 +698,10 @@ class _ChatScreenState extends State<ChatScreen> {
         'context': pendingTurn.context.toJson(),
       });
     } catch (error) {
-      _handleSocketClosed(socket, error: '$error');
+      _handleSocketClosed(
+        socket,
+        error: describeConnectionIssue(error, serverUrl: widget.client.baseUrl),
+      );
     }
   }
 
@@ -1215,7 +1237,10 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _submittingApproval = false;
       });
-      _handleSocketClosed(socket, error: '$error');
+      _handleSocketClosed(
+        socket,
+        error: describeConnectionIssue(error, serverUrl: widget.client.baseUrl),
+      );
     }
   }
 
@@ -1483,7 +1508,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
       setState(() {
-        _error = '$error';
+        _error = describeConnectionIssue(error, serverUrl: candidate);
         _health = null;
         _modelSettings = null;
         _selectedModelKey = null;
@@ -1542,7 +1567,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
       setState(() {
-        _error = '$error';
+        _error = describeConnectionIssue(error, serverUrl: candidate);
         _saving = false;
       });
     }
@@ -1592,7 +1617,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
       setState(() {
-        _error = '$error';
+        _error = describeConnectionIssue(error, serverUrl: candidate);
         _selectedModelKey = previousModelKey;
         _updatingModel = false;
       });
