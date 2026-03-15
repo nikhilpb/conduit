@@ -78,7 +78,7 @@ Both persist across container rebuilds.
 
 `config/scheduled_sessions.yaml` configures optional headless scheduled runs. Each entry defines `id`, `schedule` (5-field cron in the backend process timezone), `model`, `seed_query`, and `allowed_tools`. Each trigger creates a fresh scheduled session in the main SQLite session history and injects the scheduler fire time as the per-turn current-time context.
 
-The repo currently ships with one scheduled job: `iran-us-conflict-news` runs daily at `08:00` in the backend process timezone using `claude-sonnet-4-6` plus `web_search` and `web_fetch`.
+The repo currently ships with one scheduled job: `iran-us-conflict-news` runs daily at `08:00` in the backend process timezone using `claude-opus-4-6` plus `web_search` and `web_fetch`.
 
 ### Codex in the Container
 

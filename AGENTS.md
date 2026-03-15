@@ -27,7 +27,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Headless scheduled sessions can be configured on the backend via `config/scheduled_sessions.yaml`; each scheduled run uses its configured raw model name, cron schedule, seed query, and allowed tool list.
-- The repo default scheduled config currently includes `iran-us-conflict-news`, which runs daily at `08:00` in the backend process timezone using `claude-sonnet-4-6` with `web_search` and `web_fetch`.
+- The repo default scheduled config currently includes `iran-us-conflict-news`, which runs daily at `08:00` in the backend process timezone using `claude-opus-4-6` with `web_search` and `web_fetch`.
 - Supported base models:
   - `Claude Opus 4.6`
   - `Claude Sonnet 4.6`
@@ -153,7 +153,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
   - `uv run conduit-api`
 - Backend tests:
   - `uv run pytest`
-  - Pytest uses `tests/conftest.py` to point `CONDUIT_SCHEDULED_SESSIONS_CONFIG_PATH` at an empty temp file by default; scheduled-session tests opt into explicit configs when needed.
+  - Pytest sets `CONDUIT_SCHEDULED_SESSIONS_CONFIG_PATH` at `tests/conftest.py` import time to an empty temp file by default, so importing `conduit.main` during collection does not require real provider credentials; scheduled-session tests opt into explicit configs when needed.
 - In-container Codex:
   - `docker compose exec -w /workspace conduit-api codex`
 - GitHub PR checks:

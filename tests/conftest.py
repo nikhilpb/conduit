@@ -1,8 +1,15 @@
-import pytest
+import os
+from pathlib import Path
+import tempfile
 
 
-@pytest.fixture(autouse=True)
-def _discard_default_scheduled_sessions_config(monkeypatch, tmp_path_factory):
-    path = tmp_path_factory.mktemp("scheduled-config") / "scheduled_sessions.yaml"
-    path.write_text("scheduled_sessions: []\n")
-    monkeypatch.setenv("CONDUIT_SCHEDULED_SESSIONS_CONFIG_PATH", str(path))
+# `conduit.main` constructs the app at import time, so tests need this override
+# in place before pytest imports the test modules themselves.
+_DEFAULT_SCHEDULED_CONFIG_PATH = (
+    Path(tempfile.mkdtemp(prefix="conduit-scheduled-config-"))
+    / "scheduled_sessions.yaml"
+)
+_DEFAULT_SCHEDULED_CONFIG_PATH.write_text("scheduled_sessions: []\n")
+os.environ["CONDUIT_SCHEDULED_SESSIONS_CONFIG_PATH"] = str(
+    _DEFAULT_SCHEDULED_CONFIG_PATH
+)
