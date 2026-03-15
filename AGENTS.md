@@ -1,5 +1,7 @@
 # Conduit Agent Notes
 
+[WRITING STYLE] This file describes the **current state** of the project as a standalone reference. Do not write it as a changelog or sequence of diffs (e.g. "added X", "changed Y to Z"). Each section should read as if written from scratch today, so a future agent with no prior context can understand the project immediately.
+
 [VERY IMPORTANT] For each new commit reflect on whether `AGENTS.md` can be updated for future agent sessions. Only important changes should go in the file.
 
 [VERY IMPORTANT] After completing work in a git worktree, always commit the changes and open a pull request unless the user explicitly asks not to.
@@ -74,10 +76,18 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - `src/conduit/tool_permissions.py`
   - Loads `allow` / `ask` / `deny` policy from `config/tools.yaml`.
   - Enforces that `bash` stays approval-gated even if configured as `allow`.
+- `src/conduit/schemas.py`
+  - Pydantic models for the API surface (health, sessions, transcripts, chat, model settings, context estimates).
+- `src/conduit/tool_call_utils.py`
+  - Helpers for tool response status, sanitized bash payloads, and internal tool-call filtering.
 - `src/conduit/recipe_catalog.py`
   - Resolves the configured recipe catalog path and ranks recipe matches.
 - `src/conduit/tools/bash.py`
   - Executes `bash -lc` on the host with structured stdout/stderr, timeout, and exit-code results.
+- `src/conduit/tools/web_search.py`
+  - Brave Search API with Ecosia HTML fallback; normalizes navigational queries.
+- `src/conduit/tools/web_fetch.py`
+  - HTTP fetch with HTML cleaning via BeautifulSoup; returns structured content or error payloads.
 - `src/conduit/tools/polymarket.py`
   - Public Polymarket Gamma/CLOB API integration for market lookup and pricing history.
 - `src/conduit/tools/recipe_lookup.py`
@@ -108,12 +118,12 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 - The Flutter client hides internal `adk_request_confirmation` transcript items entirely once their hidden tool calls are stripped; approvals only appear through the dedicated approval UI.
 - Standalone tool-call transcript items render as chips without an enclosing chat bubble; `bash` chips are labeled as `Bash(<truncated command>)`.
 - Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
-- Session records now include `session_kind` (`interactive` or `scheduled`) and an optional `scheduled_job_id`.
-- `bash` tool results now preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, but the Flutter client no longer renders inline bash output; it keeps a single bash invocation chip in history and in live turns.
+- Session records include `session_kind` (`interactive` or `scheduled`) and an optional `scheduled_job_id`.
+- `bash` tool results preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, but the Flutter client does not render inline bash output; it keeps a single bash invocation chip in history and in live turns.
 - The websocket/interactive chat runner exposes `bash`; the plain HTTP `/chat` runner intentionally excludes `bash` because that surface cannot complete approval handshakes.
 - Scheduled runners are separate headless ADK runners: they use only their configured `allowed_tools` list and auto-approve those tools, including `bash`.
 - Chat composer shows the currently active model label.
-- Chat composer now shows an estimated next-turn context token count and a soft usage bar based on completed session history, the current draft, and hidden per-turn context.
+- Chat composer shows an estimated next-turn context token count and a soft usage bar based on completed session history, the current draft, and hidden per-turn context.
 - `/health` exposes `context_chars_per_token`; session detail / HTTP chat responses expose `context_estimate`; websocket `tool_result` events expose `context_chars_delta` and `done` events include an authoritative `context_estimate`.
 - Current server URL comes from `--dart-define=CONDUIT_SERVER_URL=...` on first launch, but user settings can override later.
 
@@ -121,7 +131,7 @@ Prefer this file for the current implementation state. [DESIGN.md](/Users/nikhil
 
 - `bash` returns structured results for non-zero exits, invalid working directories, spawn failures, and timeouts instead of raising; stdout/stderr are truncated to a server-side cap.
 - `web_fetch` returns structured error payloads for invalid URLs, HTTP status failures, and network failures instead of raising; the agent can continue the turn after a failed fetch.
-- Tool-call records now carry `tool_call_id`, `status`, and optional `error` across HTTP transcript responses and websocket replay state.
+- Tool-call records carry `tool_call_id`, `status`, and optional `error` across HTTP transcript responses and websocket replay state.
 
 ## Configuration + Runtime
 
