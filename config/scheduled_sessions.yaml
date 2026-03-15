@@ -9,3 +9,8 @@ scheduled_sessions:
     allowed_tools:
       - web_search
       - web_fetch
+  - id: test-hi
+    schedule: "0 0 * * *"
+    model: gemini-3-flash-preview
+    seed_query: hi
+    allowed_tools: []

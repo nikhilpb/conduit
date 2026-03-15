@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+SCHEDULED_SESSIONS_TIMEZONE = UTC
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +36,10 @@ class ScheduledSessionDefinition:
     allowed_tools: tuple[str, ...]
 
 
-def process_timezone() -> tzinfo:
-    """Return the backend process timezone."""
+def scheduled_sessions_timezone() -> tzinfo:
+    """Return the fixed timezone used for scheduled sessions."""
 
-    return datetime.now().astimezone().tzinfo or UTC
+    return SCHEDULED_SESSIONS_TIMEZONE
 
 
 def load_scheduled_sessions(
@@ -63,7 +64,7 @@ def load_scheduled_sessions(
         raise ValueError("scheduled session config must define a list of sessions")
 
     available_tool_names = set(list_available_tool_names(settings))
-    timezone = process_timezone()
+    timezone = scheduled_sessions_timezone()
     definitions: list[ScheduledSessionDefinition] = []
     seen_ids: set[str] = set()
 
@@ -128,7 +129,7 @@ class ScheduledSessionScheduler:
     ) -> None:
         self.runtime = runtime
         self.definitions = {definition.id: definition for definition in definitions}
-        self.timezone = process_timezone()
+        self.timezone = scheduled_sessions_timezone()
         self._scheduler = AsyncIOScheduler(
             timezone=self.timezone,
             job_defaults={"coalesce": False},

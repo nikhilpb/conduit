@@ -1,11 +1,14 @@
 import asyncio
+from datetime import UTC
 
 import pytest
 
+import conduit.scheduled_sessions as scheduled_sessions_module
 from conduit.config import Settings
 from conduit.scheduled_sessions import ScheduledSessionDefinition
 from conduit.scheduled_sessions import ScheduledSessionScheduler
 from conduit.scheduled_sessions import load_scheduled_sessions
+from conduit.scheduled_sessions import scheduled_sessions_timezone
 
 
 def test_load_scheduled_sessions_accepts_valid_config(tmp_path):
@@ -134,6 +137,17 @@ scheduled_sessions:
         )
 
 
+def test_scheduled_sessions_timezone_is_fixed_to_utc(monkeypatch):
+    class _UnexpectedDatetime:
+        @classmethod
+        def now(cls, *args, **kwargs):
+            raise AssertionError("scheduled sessions should not read machine timezone")
+
+    monkeypatch.setattr(scheduled_sessions_module, "datetime", _UnexpectedDatetime)
+
+    assert scheduled_sessions_timezone() is UTC
+
+
 class _FakeScheduledRuntime:
     def __init__(self, *, delay_seconds: float = 0.0):
         self.calls: list[str] = []
@@ -170,6 +184,7 @@ async def test_scheduled_session_scheduler_skips_overlapping_runs():
 
     assert runtime.calls == ["daily-briefing"]
     assert runtime.current_times[0] is not None
+    assert runtime.current_times[0].tzinfo is UTC
 
 
 @pytest.mark.anyio

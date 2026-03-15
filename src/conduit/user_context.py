@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC
 from datetime import datetime
 from typing import Any
 
@@ -48,12 +49,14 @@ def build_state_delta(context: TurnContext | None) -> dict[str, Any]:
 def build_current_time_state_delta(
     current_time: datetime | None = None,
 ) -> dict[str, str]:
-    """Build a state delta containing the formatted current local time."""
+    """Build a state delta containing the formatted current time."""
+
+    resolved_current_time = current_time
+    if resolved_current_time is None:
+        resolved_current_time = datetime.now(UTC)
 
     return {
-        CURRENT_TIME_STATE_KEY: format_current_time(
-            current_time or datetime.now().astimezone()
-        )
+        CURRENT_TIME_STATE_KEY: format_current_time(resolved_current_time)
     }
 
 
@@ -116,7 +119,9 @@ def build_context_instructions(state: Any) -> list[str]:
 def format_current_time(current_time: datetime) -> str:
     """Render a datetime in the same user-facing format as client context."""
 
-    localized_time = current_time.astimezone()
+    localized_time = current_time
+    if localized_time.tzinfo is None or localized_time.utcoffset() is None:
+        localized_time = localized_time.astimezone()
     utc_offset = localized_time.strftime("%z")
     if utc_offset:
         utc_offset = f"{utc_offset[:3]}:{utc_offset[3:]}"
