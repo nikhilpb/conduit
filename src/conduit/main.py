@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from contextlib import suppress
 
 from fastapi import FastAPI
@@ -18,6 +19,7 @@ from conduit.context_estimate import CONTEXT_CHARS_PER_TOKEN
 from conduit.context_estimate import ContextEstimate
 from conduit.context_estimate import estimate_events_context
 from conduit.runtime import ConduitRuntime
+from conduit.scheduled_sessions import ScheduledSessionScheduler
 from conduit.schemas import ChatRequest
 from conduit.schemas import ChatResponse
 from conduit.schemas import ContextEstimateResponse
@@ -44,15 +46,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     runtime = ConduitRuntime(resolved_settings)
     chat_manager = WebSocketChatManager(runtime)
+    scheduled_session_scheduler = ScheduledSessionScheduler(
+        runtime=runtime,
+        definitions=runtime.scheduled_sessions,
+    )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        await scheduled_session_scheduler.start()
+        try:
+            yield
+        finally:
+            await scheduled_session_scheduler.shutdown()
 
     app = FastAPI(
         title="Conduit API",
         version="0.1.0",
         description="Minimal ADK-backed FastAPI gateway for Conduit.",
+        lifespan=lifespan,
     )
     app.state.settings = resolved_settings
     app.state.runtime = runtime
     app.state.chat_manager = chat_manager
+    app.state.scheduled_session_scheduler = scheduled_session_scheduler
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -101,6 +117,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     last_update_time=session.last_update_time,
                     event_count=session.event_count,
                     title=session.title,
+                    session_kind=session.session_kind,
+                    scheduled_job_id=session.scheduled_job_id,
                 )
                 for session in sessions
             ]
@@ -109,10 +127,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/sessions/{session_id}", response_model=SessionDetailResponse)
     async def get_session(session_id: str, request: Request) -> SessionDetailResponse:
         session = await _lookup_session(request, session_id)
-        if session is None:
+        metadata = await _lookup_session_metadata(request, session_id)
+        if session is None or metadata is None:
             raise HTTPException(status_code=404, detail="session not found")
         return SessionDetailResponse(
             session_id=session.id,
+            session_kind=metadata.session_kind,
+            scheduled_job_id=metadata.scheduled_job_id,
             messages=_build_transcript(session.events),
             context_estimate=_context_estimate_response(
                 estimate_events_context(session.events)
@@ -175,6 +196,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 async def _lookup_session(request: Request, session_id: str):
     runtime: ConduitRuntime = request.app.state.runtime
     return await runtime.session_service.get_session(
+        app_name=runtime.settings.app_name,
+        user_id=runtime.settings.internal_user_id,
+        session_id=session_id,
+    )
+
+
+async def _lookup_session_metadata(request: Request, session_id: str):
+    runtime: ConduitRuntime = request.app.state.runtime
+    return await runtime.session_service.get_session_metadata(
         app_name=runtime.settings.app_name,
         user_id=runtime.settings.internal_user_id,
         session_id=session_id,

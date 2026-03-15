@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from dataclasses import field
-from typing import AsyncIterator
+from datetime import datetime
 from typing import Any
+from typing import AsyncIterator
 from typing import Literal
 import uuid
 
@@ -26,11 +27,14 @@ from conduit.model_registry import ModelOption
 from conduit.model_registry import ModelRegistry
 from conduit.model_registry import load_model_registry
 from conduit.model_registry import persist_model_registry
+from conduit.scheduled_sessions import ScheduledSessionDefinition
+from conduit.scheduled_sessions import load_scheduled_sessions
 from conduit.sessions import SQLiteSessionService
-from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_call_utils import is_internal_tool_call
 from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
+from conduit.tool_permissions import effective_tool_permission
+from conduit.user_context import build_current_time_state_delta
 
 
 @dataclass(slots=True)
@@ -53,6 +57,13 @@ class RuntimeTurnUpdate:
     text: str = ""
 
 
+@dataclass(slots=True)
+class ScheduledSessionRuntime:
+    definition: ScheduledSessionDefinition
+    app: App
+    runner: Runner
+
+
 class ConduitRuntime:
     """Thin wrapper around ADK's runner and session service."""
 
@@ -65,7 +76,12 @@ class ConduitRuntime:
             fallback_model=settings.model,
         )
         persist_model_registry(settings.models_config_path, self._model_registry)
+        self._scheduled_sessions = load_scheduled_sessions(
+            settings.scheduled_sessions_config_path,
+            settings=settings,
+        )
         self._apply_model_registry(self._model_registry)
+        self._scheduled_session_runtimes = self._build_scheduled_session_runtimes()
 
     @property
     def active_model(self) -> ModelOption:
@@ -74,6 +90,14 @@ class ConduitRuntime:
     @property
     def model_registry(self) -> ModelRegistry:
         return self._model_registry
+
+    @property
+    def scheduled_sessions(self) -> tuple[ScheduledSessionDefinition, ...]:
+        return self._scheduled_sessions
+
+    @property
+    def scheduled_session_runtimes(self) -> dict[str, ScheduledSessionRuntime]:
+        return dict(self._scheduled_session_runtimes)
 
     async def set_active_model(self, model_key: str) -> ModelOption:
         """Persist and activate a new base model."""
@@ -92,13 +116,21 @@ class ConduitRuntime:
             self._apply_model_registry(registry)
             return registry.active
 
-    async def create_session(self, session_id: str | None = None) -> Session:
+    async def create_session(
+        self,
+        session_id: str | None = None,
+        *,
+        session_kind: Literal["interactive", "scheduled"] = "interactive",
+        scheduled_job_id: str | None = None,
+    ) -> Session:
         """Create a new chat session."""
 
         return await self.session_service.create_session(
             app_name=self.settings.app_name,
             user_id=self.settings.internal_user_id,
             session_id=session_id,
+            session_kind=session_kind,
+            scheduled_job_id=scheduled_job_id,
         )
 
     async def list_sessions(self) -> list[Session]:
@@ -268,6 +300,44 @@ class ConduitRuntime:
         """Run a single user turn against the ADK runner."""
 
         session = await self.get_or_create_session(session_id)
+        return await self._run_session_turn(
+            session=session,
+            message=message,
+            state_delta=state_delta,
+            runner=self.http_runner,
+        )
+
+    async def run_scheduled_session(
+        self,
+        scheduled_job_id: str,
+        *,
+        current_time: datetime | None = None,
+    ) -> TurnResult:
+        """Run one configured scheduled session headlessly."""
+
+        scheduled_runtime = self._scheduled_session_runtimes.get(scheduled_job_id)
+        if scheduled_runtime is None:
+            raise KeyError(f"unknown scheduled session id: {scheduled_job_id}")
+
+        session = await self.create_session(
+            session_kind="scheduled",
+            scheduled_job_id=scheduled_job_id,
+        )
+        return await self._run_session_turn(
+            session=session,
+            message=scheduled_runtime.definition.seed_query,
+            runner=scheduled_runtime.runner,
+            state_delta=build_current_time_state_delta(current_time),
+        )
+
+    async def _run_session_turn(
+        self,
+        *,
+        session: Session,
+        message: str,
+        runner: Runner,
+        state_delta: dict[str, Any] | None = None,
+    ) -> TurnResult:
         tool_calls: list[dict[str, Any]] = []
         tool_call_index_by_id: dict[str, int] = {}
         reply = ""
@@ -276,7 +346,7 @@ class ConduitRuntime:
             session=session,
             message=message,
             state_delta=state_delta,
-            runner=self.http_runner,
+            runner=runner,
         ):
             if update.kind == "tool_call":
                 tool_call = {
@@ -325,29 +395,52 @@ class ConduitRuntime:
         )
 
     def _apply_model_registry(self, registry: ModelRegistry) -> None:
-        self.app = App(
+        self.app, self.runner = self._build_runner(
+            model_name=registry.active.model,
+        )
+        self.http_app, self.http_runner = self._build_runner(
+            model_name=registry.active.model,
+            enable_bash=False,
+        )
+
+    def _build_scheduled_session_runtimes(
+        self,
+    ) -> dict[str, ScheduledSessionRuntime]:
+        scheduled_runtimes: dict[str, ScheduledSessionRuntime] = {}
+        for definition in self._scheduled_sessions:
+            app, runner = self._build_runner(
+                model_name=definition.model,
+                allowed_tools=definition.allowed_tools,
+                auto_approve_tools=True,
+            )
+            scheduled_runtimes[definition.id] = ScheduledSessionRuntime(
+                definition=definition,
+                app=app,
+                runner=runner,
+            )
+        return scheduled_runtimes
+
+    def _build_runner(
+        self,
+        *,
+        model_name: str,
+        enable_bash: bool = True,
+        allowed_tools: tuple[str, ...] | None = None,
+        auto_approve_tools: bool = False,
+    ) -> tuple[App, Runner]:
+        app = App(
             name=self.settings.app_name,
             root_agent=build_root_agent(
                 self.settings,
-                model_name=registry.active.model,
+                model_name=model_name,
+                enable_bash=enable_bash,
+                allowed_tools=allowed_tools,
+                auto_approve_tools=auto_approve_tools,
             ),
             resumability_config=ResumabilityConfig(is_resumable=True),
         )
-        self.runner = Runner(
-            app=self.app,
-            session_service=self.session_service,
-        )
-        self.http_app = App(
-            name=self.settings.app_name,
-            root_agent=build_root_agent(
-                self.settings,
-                model_name=registry.active.model,
-                enable_bash=False,
-            ),
-            resumability_config=ResumabilityConfig(is_resumable=True),
-        )
-        self.http_runner = Runner(
-            app=self.http_app,
+        return app, Runner(
+            app=app,
             session_service=self.session_service,
         )
 
