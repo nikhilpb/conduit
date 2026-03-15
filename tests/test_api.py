@@ -18,6 +18,7 @@ from conduit.runtime import TurnResult
 from conduit.user_context import CURRENT_TIME_STATE_KEY
 from conduit.user_context import LOCATION_STATE_KEY
 from conduit.user_context import PERSONAL_INSTRUCTIONS_STATE_KEY
+from conduit.user_context import format_current_time
 
 
 def _empty_scheduled_sessions_path(tmp_path) -> str:
@@ -324,7 +325,7 @@ scheduled_sessions:
 
     assert result.reply == "Scheduled reply."
     assert captured_state_delta == {
-        CURRENT_TIME_STATE_KEY: "2026-03-10 08:00:00 CET (UTC+01:00)"
+        CURRENT_TIME_STATE_KEY: format_current_time(scheduled_time)
     }
     assert list_response.status_code == 200
     assert list_response.json()["sessions"] == [
