@@ -216,6 +216,14 @@ class ScheduledSessionScheduler:
         finally:
             await self._clear_running(job_id)
 
+    def get_next_run_time(self, job_id: str) -> str | None:
+        """Return the ISO-formatted next run time for a job, or None."""
+
+        job = self._scheduler.get_job(job_id)
+        if job is None or job.next_run_time is None:
+            return None
+        return job.next_run_time.isoformat()
+
     async def _mark_running(self, job_id: str) -> bool:
         async with self._state_lock:
             if job_id in self._running_jobs:
