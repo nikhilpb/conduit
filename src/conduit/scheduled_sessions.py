@@ -18,6 +18,8 @@ import yaml
 from conduit.agent import list_available_tool_names
 from conduit.config import Settings
 from conduit.model_registry import infer_provider
+from conduit.notification_hub import NotificationEvent
+from conduit.notification_hub import NotificationHub
 
 if TYPE_CHECKING:
     from conduit.runtime import ConduitRuntime
@@ -132,9 +134,11 @@ class ScheduledSessionScheduler:
         *,
         runtime: ConduitRuntime,
         definitions: tuple[ScheduledSessionDefinition, ...],
+        notification_hub: NotificationHub | None = None,
     ) -> None:
         self.runtime = runtime
         self.definitions = {definition.id: definition for definition in definitions}
+        self.notification_hub = notification_hub
         self.timezone = scheduled_sessions_timezone()
         self._scheduler = AsyncIOScheduler(
             timezone=self.timezone,
@@ -210,6 +214,18 @@ class ScheduledSessionScheduler:
                 len(result.reply),
                 len(result.tool_calls),
             )
+            if self.notification_hub:
+                definition = self.definitions[job_id]
+                await self.notification_hub.broadcast(
+                    NotificationEvent(
+                        type="new_message",
+                        session_id=result.session_id,
+                        session_title=definition.seed_query[:80],
+                        session_kind="scheduled",
+                        scheduled_job_id=job_id,
+                        preview=result.reply[:200],
+                    )
+                )
         except Exception:  # pragma: no cover - defensive logging
             elapsed = (datetime.now(self.timezone) - start_time).total_seconds()
             logger.exception("Scheduled session %s failed after %.1fs.", job_id, elapsed)

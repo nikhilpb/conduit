@@ -16,6 +16,8 @@ from google.adk.sessions.session import Session
 from google.genai import types
 
 from conduit.context_estimate import estimate_tool_result_chars
+from conduit.notification_hub import NotificationEvent
+from conduit.notification_hub import NotificationHub
 from conduit.runtime import ConduitRuntime
 from conduit.sessions.sqlite_service import ClientTurnRecord
 from conduit.tool_permissions import permission_summary
@@ -98,8 +100,14 @@ class ActiveTurn:
 class WebSocketChatManager:
     """Manage active websocket turns and replay completed messages."""
 
-    def __init__(self, runtime: ConduitRuntime):
+    def __init__(
+        self,
+        runtime: ConduitRuntime,
+        *,
+        notification_hub: NotificationHub | None = None,
+    ):
         self.runtime = runtime
+        self.notification_hub = notification_hub
         self._active_turns: dict[tuple[str, str], ActiveTurn] = {}
         self._approval_index: dict[str, tuple[str, str]] = {}
         self._lock = asyncio.Lock()
@@ -472,6 +480,21 @@ class WebSocketChatManager:
                 event_history=event_history,
             )
             await turn.mark_done()
+            if self.notification_hub:
+                title = await self.runtime.session_service.get_session_title(
+                    app_name=self.runtime.settings.app_name,
+                    user_id=self.runtime.settings.internal_user_id,
+                    session_id=session.id,
+                )
+                await self.notification_hub.broadcast(
+                    NotificationEvent(
+                        type="new_message",
+                        session_id=session.id,
+                        session_title=title,
+                        session_kind="interactive",
+                        preview=reply[:200],
+                    )
+                )
             terminal = True
         except Exception as exc:
             await turn.publish(

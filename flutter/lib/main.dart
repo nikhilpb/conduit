@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'context_estimate.dart';
 import 'conduit_api.dart';
 import 'models.dart';
+import 'notification_service.dart';
 import 'settings_store.dart';
 
 const _defaultServerUrl = String.fromEnvironment('CONDUIT_SERVER_URL');
@@ -44,11 +45,51 @@ class ConduitApp extends StatefulWidget {
 
 class _ConduitAppState extends State<ConduitApp> {
   late String? _serverUrl = widget.initialServerUrl;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  late final NotificationService _notificationService;
+
+  @override
+  void initState() {
+    super.initState();
+    _notificationService = NotificationService(
+      onNotificationTap: _handleNotificationTap,
+    );
+    _notificationService.initialize();
+    final url = _serverUrl;
+    if (url != null && url.trim().isNotEmpty) {
+      _notificationService.connect(url);
+    }
+  }
+
+  @override
+  void dispose() {
+    _notificationService.dispose();
+    super.dispose();
+  }
+
+  void _handleNotificationTap(String sessionId) {
+    final navState = _navigatorKey.currentState;
+    if (navState == null) return;
+    final url = _serverUrl;
+    if (url == null || url.trim().isEmpty) return;
+    final client = ConduitApiClient(baseUrl: url);
+    navState.push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => ChatScreen(
+          client: client,
+          settingsStore: widget.settingsStore,
+          sessionId: sessionId,
+          notificationService: _notificationService,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final baseTextTheme = GoogleFonts.ibmPlexSansTextTheme();
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Conduit',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -93,10 +134,16 @@ class _ConduitAppState extends State<ConduitApp> {
       home: SessionListScreen(
         serverUrl: _serverUrl,
         settingsStore: widget.settingsStore,
+        notificationService: _notificationService,
         onServerUrlChanged: (serverUrl) {
           setState(() {
             _serverUrl = serverUrl;
           });
+          if (serverUrl != null && serverUrl.trim().isNotEmpty) {
+            _notificationService.connect(serverUrl);
+          } else {
+            _notificationService.disconnect();
+          }
         },
       ),
     );
@@ -109,11 +156,13 @@ class SessionListScreen extends StatefulWidget {
     required this.serverUrl,
     required this.settingsStore,
     required this.onServerUrlChanged,
+    this.notificationService,
   });
 
   final String? serverUrl;
   final SettingsStore settingsStore;
   final ValueChanged<String?> onServerUrlChanged;
+  final NotificationService? notificationService;
 
   @override
   State<SessionListScreen> createState() => _SessionListScreenState();
@@ -212,8 +261,11 @@ class _SessionListScreenState extends State<SessionListScreen> {
     }
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (context) =>
-            ChatScreen(client: client, settingsStore: widget.settingsStore),
+        builder: (context) => ChatScreen(
+              client: client,
+              settingsStore: widget.settingsStore,
+              notificationService: widget.notificationService,
+            ),
       ),
     );
     await _refresh();
@@ -231,6 +283,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
           settingsStore: widget.settingsStore,
           sessionId: session.sessionId,
           initialTitle: session.title,
+          notificationService: widget.notificationService,
         ),
       ),
     );
@@ -360,6 +413,7 @@ class ChatScreen extends StatefulWidget {
     required this.settingsStore,
     this.sessionId,
     this.initialTitle,
+    this.notificationService,
     DateTime Function()? nowProvider,
   }) : nowProvider = nowProvider ?? DateTime.now;
 
@@ -367,6 +421,7 @@ class ChatScreen extends StatefulWidget {
   final SettingsStore settingsStore;
   final String? sessionId;
   final String? initialTitle;
+  final NotificationService? notificationService;
   final DateTime Function() nowProvider;
 
   @override
@@ -407,6 +462,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _composer.addListener(_handleComposerChanged);
+    widget.notificationService?.activeSessionId = _sessionId;
     _loadMessages();
     _loadActiveModel();
     _loadUserContextSettings();
@@ -416,6 +472,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _disposed = true;
+    widget.notificationService?.activeSessionId = null;
     _reconnectTimer?.cancel();
     unawaited(_chatSubscription?.cancel() ?? Future<void>.value());
     unawaited(_chatSocket?.dispose() ?? Future<void>.value());
@@ -769,6 +826,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() {
       _sessionId = event.sessionId ?? _sessionId;
+      widget.notificationService?.activeSessionId = _sessionId;
       _pendingTurns = {
         ..._pendingTurns,
         messageId: pendingTurn.copyWith(turnId: turnId),

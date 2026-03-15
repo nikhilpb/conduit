@@ -18,6 +18,7 @@ from conduit.config import get_settings
 from conduit.context_estimate import CONTEXT_CHARS_PER_TOKEN
 from conduit.context_estimate import ContextEstimate
 from conduit.context_estimate import estimate_events_context
+from conduit.notification_hub import NotificationHub
 from conduit.runtime import ConduitRuntime
 from conduit.scheduled_sessions import ScheduledSessionScheduler
 from conduit.schemas import ChatRequest
@@ -47,10 +48,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     resolved_settings = settings or get_settings()
     runtime = ConduitRuntime(resolved_settings)
-    chat_manager = WebSocketChatManager(runtime)
+    notification_hub = NotificationHub()
+    chat_manager = WebSocketChatManager(runtime, notification_hub=notification_hub)
     scheduled_session_scheduler = ScheduledSessionScheduler(
         runtime=runtime,
         definitions=runtime.scheduled_sessions,
+        notification_hub=notification_hub,
     )
 
     @asynccontextmanager
@@ -71,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.runtime = runtime
     app.state.chat_manager = chat_manager
     app.state.scheduled_session_scheduler = scheduled_session_scheduler
+    app.state.notification_hub = notification_hub
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -210,6 +214,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with suppress(asyncio.CancelledError):
                 await writer_task
 
+    @app.websocket("/notifications")
+    async def notifications_websocket(websocket: WebSocket) -> None:
+        await websocket.accept()
+        hub: NotificationHub = websocket.app.state.notification_hub
+        queue = await hub.subscribe()
+        writer_task = asyncio.create_task(_notification_writer(websocket, queue))
+
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await hub.unsubscribe(queue)
+            writer_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await writer_task
+
     return app
 
 
@@ -293,6 +315,12 @@ def _build_transcript(events) -> list[TranscriptMessage]:
 
 
 async def _websocket_writer(websocket: WebSocket, queue: asyncio.Queue[dict]) -> None:
+    while True:
+        event = await queue.get()
+        await websocket.send_json(event)
+
+
+async def _notification_writer(websocket: WebSocket, queue: asyncio.Queue[dict]) -> None:
     while True:
         event = await queue.get()
         await websocket.send_json(event)

@@ -768,6 +768,35 @@ class SQLiteSessionService(BaseSessionService):
             user_id=user_id,
         )
 
+    async def get_session_title(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        session_id: str,
+    ) -> str:
+        return await asyncio.to_thread(
+            self._get_session_title_sync,
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+    def _get_session_title_sync(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        session_id: str,
+    ) -> str:
+        with self._connect() as connection:
+            return self._load_session_title(
+                connection,
+                app_name=app_name,
+                user_id=user_id,
+                session_id=session_id,
+            )
+
     async def get_session_metadata(
         self,
         *,
