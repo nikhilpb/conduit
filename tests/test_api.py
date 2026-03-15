@@ -340,6 +340,73 @@ scheduled_sessions:
     assert detail_response.json()["messages"][1]["text"] == "Scheduled reply."
 
 
+def test_list_scheduled_sessions_endpoint(tmp_path):
+    scheduled_config_path = tmp_path / "scheduled_sessions.yaml"
+    scheduled_config_path.write_text(
+        """
+scheduled_sessions:
+  - id: daily-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Summarize the morning news.
+    allowed_tools:
+      - web_fetch
+  - id: nightly-check
+    schedule: "0 22 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Run nightly checks.
+    allowed_tools:
+      - web_search
+      - web_fetch
+"""
+    )
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=str(scheduled_config_path),
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get("/scheduled-sessions")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["scheduled_sessions"]) == 2
+
+    first = data["scheduled_sessions"][0]
+    assert first["id"] == "daily-briefing"
+    assert first["schedule"] == "0 9 * * *"
+    assert first["model"] == "gemini-3-flash-preview"
+    assert first["seed_query"] == "Summarize the morning news."
+    assert first["allowed_tools"] == ["web_fetch"]
+
+    second = data["scheduled_sessions"][1]
+    assert second["id"] == "nightly-check"
+    assert second["allowed_tools"] == ["web_search", "web_fetch"]
+
+
+def test_list_scheduled_sessions_empty(tmp_path):
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=_empty_scheduled_sessions_path(tmp_path),
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get("/scheduled-sessions")
+
+    assert response.status_code == 200
+    assert response.json() == {"scheduled_sessions": []}
+
+
 def test_build_transcript_includes_thinking_trace():
     events = [
         Event(

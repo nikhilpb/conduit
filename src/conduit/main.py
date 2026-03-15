@@ -27,6 +27,8 @@ from conduit.schemas import CreateSessionResponse
 from conduit.schemas import HealthResponse
 from conduit.schemas import ModelOptionResponse
 from conduit.schemas import ModelSettingsResponse
+from conduit.schemas import ScheduledSessionListResponse
+from conduit.schemas import ScheduledSessionResponse
 from conduit.schemas import SessionDetailResponse
 from conduit.schemas import SessionListResponse
 from conduit.schemas import SessionResponse
@@ -98,6 +100,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _build_model_settings_response(runtime)
+
+    @app.get("/scheduled-sessions", response_model=ScheduledSessionListResponse)
+    async def list_scheduled_sessions() -> ScheduledSessionListResponse:
+        return ScheduledSessionListResponse(
+            scheduled_sessions=[
+                ScheduledSessionResponse(
+                    id=definition.id,
+                    schedule=definition.schedule,
+                    model=definition.model,
+                    seed_query=definition.seed_query,
+                    allowed_tools=list(definition.allowed_tools),
+                    next_run_time=scheduled_session_scheduler.get_next_run_time(
+                        definition.id
+                    ),
+                )
+                for definition in runtime.scheduled_sessions
+            ]
+        )
 
     @app.post("/sessions", response_model=CreateSessionResponse, status_code=201)
     async def create_session() -> CreateSessionResponse:

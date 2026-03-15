@@ -116,5 +116,18 @@ class ModelSettingsResponse(BaseModel):
     options: list[ModelOptionResponse] = Field(default_factory=list)
 
 
+class ScheduledSessionResponse(BaseModel):
+    id: str
+    schedule: str
+    model: str
+    seed_query: str
+    allowed_tools: list[str]
+    next_run_time: str | None = None
+
+
+class ScheduledSessionListResponse(BaseModel):
+    scheduled_sessions: list[ScheduledSessionResponse] = Field(default_factory=list)
+
+
 class UpdateModelRequest(BaseModel):
     model_key: str = Field(min_length=1)
