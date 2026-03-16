@@ -29,7 +29,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Headless scheduled sessions can be configured on the backend via `config/scheduled_sessions.yaml`; each scheduled run uses its configured raw model name, UTC cron schedule, seed query, and allowed tool list.
-- The repo default scheduled config currently includes `iran-us-conflict-news`, which runs daily at `08:00 UTC` using `claude-opus-4-6` with `web_search` and `web_fetch`, plus `test-hi`, which runs daily at `00:00 UTC` using `gemini-3-flash-preview`.
+- The repo default scheduled config currently includes `iran-us-conflict-news`, which runs daily at `06:00 UTC` using `claude-opus-4-6` with `web_search`, `web_fetch`, and all Polymarket tools.
 - Supported base models:
   - `Claude Opus 4.6`
   - `Claude Sonnet 4.6`
