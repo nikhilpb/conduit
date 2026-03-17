@@ -19,6 +19,7 @@ from conduit.runtime import TurnResult
 from conduit.user_context import CURRENT_TIME_STATE_KEY
 from conduit.user_context import LOCATION_STATE_KEY
 from conduit.user_context import PERSONAL_INSTRUCTIONS_STATE_KEY
+from conduit.user_context import SCHEDULED_SESSION_SUMMARIES_STATE_KEY
 
 
 def _empty_scheduled_sessions_path(tmp_path) -> str:
@@ -338,6 +339,277 @@ scheduled_sessions:
     assert detail_response.json()["scheduled_job_id"] == "daily-briefing"
     assert detail_response.json()["messages"][0]["text"] == "Summarize the morning news."
     assert detail_response.json()["messages"][1]["text"] == "Scheduled reply."
+
+
+def test_scheduled_session_runs_include_recent_summaries_and_persist_new_summary(
+    tmp_path,
+):
+    scheduled_config_path = tmp_path / "scheduled_sessions.yaml"
+    scheduled_config_path.write_text(
+        """
+scheduled_sessions:
+  - id: daily-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Summarize the morning news.
+    allowed_tools:
+      - web_fetch
+"""
+    )
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=str(scheduled_config_path),
+        )
+    )
+    runtime = app.state.runtime
+
+    for index in range(8):
+        session = asyncio.run(
+            runtime.create_session(
+                session_id=f"prior-{index}",
+                session_kind="scheduled",
+                scheduled_job_id="daily-briefing",
+            )
+        )
+        asyncio.run(
+            runtime.session_service.save_scheduled_session_summary(
+                app_name=runtime.settings.app_name,
+                user_id=runtime.settings.internal_user_id,
+                scheduled_job_id="daily-briefing",
+                source_session_id=session.id,
+                summary_text=f"summary {index + 1}",
+                created_at=float(index + 1),
+            )
+        )
+
+    captured_state_delta: dict[str, object] = {}
+    summarize_calls: list[tuple[str, str]] = []
+
+    async def fake_iter_events(
+        *,
+        session,
+        new_message,
+        invocation_id: str | None = None,
+        state_delta=None,
+        runner=None,
+    ):
+        del invocation_id, runner
+        captured_state_delta.update(dict(state_delta or {}))
+        user_event = Event(
+            invocation_id="inv-user",
+            author="user",
+            content=new_message,
+        )
+        await runtime.session_service.append_event(session, user_event)
+        yield user_event
+
+        assistant_event = Event(
+            invocation_id="inv-assistant",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text="Scheduled reply.")],
+            ),
+        )
+        await runtime.session_service.append_event(session, assistant_event)
+        yield assistant_event
+
+    async def fake_summarize(*, model_name: str, reply: str) -> str:
+        summarize_calls.append((model_name, reply))
+        return "Stored summary."
+
+    runtime.iter_events = fake_iter_events  # type: ignore[method-assign]
+    runtime._summarize_scheduled_session_reply = fake_summarize  # type: ignore[method-assign]  # noqa: SLF001
+
+    result = asyncio.run(runtime.run_scheduled_session("daily-briefing"))
+
+    assert summarize_calls == [("gemini-3-flash-preview", "Scheduled reply.")]
+    assert captured_state_delta[CURRENT_TIME_STATE_KEY].endswith("UTC (UTC+00:00)")
+    summary_context = captured_state_delta[SCHEDULED_SESSION_SUMMARIES_STATE_KEY]
+    assert summary_context == {
+        "scheduled_job_id": "daily-briefing",
+        "summaries": [
+            {
+                "created_at": summary_context["summaries"][0]["created_at"],
+                "summary_text": "summary 2",
+            },
+            {
+                "created_at": summary_context["summaries"][1]["created_at"],
+                "summary_text": "summary 3",
+            },
+            {
+                "created_at": summary_context["summaries"][2]["created_at"],
+                "summary_text": "summary 4",
+            },
+            {
+                "created_at": summary_context["summaries"][3]["created_at"],
+                "summary_text": "summary 5",
+            },
+            {
+                "created_at": summary_context["summaries"][4]["created_at"],
+                "summary_text": "summary 6",
+            },
+            {
+                "created_at": summary_context["summaries"][5]["created_at"],
+                "summary_text": "summary 7",
+            },
+            {
+                "created_at": summary_context["summaries"][6]["created_at"],
+                "summary_text": "summary 8",
+            },
+        ],
+    }
+
+    stored_summaries = asyncio.run(
+        runtime.session_service.list_scheduled_session_summaries(
+            app_name=runtime.settings.app_name,
+            user_id=runtime.settings.internal_user_id,
+            scheduled_job_id="daily-briefing",
+            limit=20,
+        )
+    )
+
+    assert result.reply == "Scheduled reply."
+    assert stored_summaries[0].source_session_id == result.session_id
+    assert stored_summaries[0].summary_text == "Stored summary."
+    assert len(stored_summaries) == 9
+
+
+def test_scheduled_session_blank_reply_skips_summary_persistence(tmp_path):
+    scheduled_config_path = tmp_path / "scheduled_sessions.yaml"
+    scheduled_config_path.write_text(
+        """
+scheduled_sessions:
+  - id: daily-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Summarize the morning news.
+    allowed_tools:
+      - web_fetch
+"""
+    )
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=str(scheduled_config_path),
+        )
+    )
+    runtime = app.state.runtime
+
+    async def fake_iter_events(
+        *,
+        session,
+        new_message,
+        invocation_id: str | None = None,
+        state_delta=None,
+        runner=None,
+    ):
+        del invocation_id, runner, state_delta
+        user_event = Event(
+            invocation_id="inv-user",
+            author="user",
+            content=new_message,
+        )
+        await runtime.session_service.append_event(session, user_event)
+        yield user_event
+
+    async def fail_if_called(*, model_name: str, reply: str) -> str:
+        raise AssertionError(f"unexpected summary call: {model_name} {reply}")
+
+    runtime.iter_events = fake_iter_events  # type: ignore[method-assign]
+    runtime._summarize_scheduled_session_reply = fail_if_called  # type: ignore[method-assign]  # noqa: SLF001
+
+    result = asyncio.run(runtime.run_scheduled_session("daily-briefing"))
+    stored_summaries = asyncio.run(
+        runtime.session_service.list_scheduled_session_summaries(
+            app_name=runtime.settings.app_name,
+            user_id=runtime.settings.internal_user_id,
+            scheduled_job_id="daily-briefing",
+            limit=20,
+        )
+    )
+
+    assert result.reply == ""
+    assert stored_summaries == []
+
+
+def test_scheduled_session_summary_failure_does_not_fail_main_run(tmp_path):
+    scheduled_config_path = tmp_path / "scheduled_sessions.yaml"
+    scheduled_config_path.write_text(
+        """
+scheduled_sessions:
+  - id: daily-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Summarize the morning news.
+    allowed_tools:
+      - web_fetch
+"""
+    )
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=str(scheduled_config_path),
+        )
+    )
+    runtime = app.state.runtime
+
+    async def fake_iter_events(
+        *,
+        session,
+        new_message,
+        invocation_id: str | None = None,
+        state_delta=None,
+        runner=None,
+    ):
+        del invocation_id, runner, state_delta
+        user_event = Event(
+            invocation_id="inv-user",
+            author="user",
+            content=new_message,
+        )
+        await runtime.session_service.append_event(session, user_event)
+        yield user_event
+
+        assistant_event = Event(
+            invocation_id="inv-assistant",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text="Scheduled reply.")],
+            ),
+        )
+        await runtime.session_service.append_event(session, assistant_event)
+        yield assistant_event
+
+    async def boom(*, model_name: str, reply: str) -> str:
+        raise RuntimeError(f"summary failed for {model_name}: {reply}")
+
+    runtime.iter_events = fake_iter_events  # type: ignore[method-assign]
+    runtime._summarize_scheduled_session_reply = boom  # type: ignore[method-assign]  # noqa: SLF001
+
+    result = asyncio.run(runtime.run_scheduled_session("daily-briefing"))
+    stored_summaries = asyncio.run(
+        runtime.session_service.list_scheduled_session_summaries(
+            app_name=runtime.settings.app_name,
+            user_id=runtime.settings.internal_user_id,
+            scheduled_job_id="daily-briefing",
+            limit=20,
+        )
+    )
+
+    assert result.reply == "Scheduled reply."
+    assert stored_summaries == []
 
 
 def test_list_scheduled_sessions_endpoint(tmp_path):

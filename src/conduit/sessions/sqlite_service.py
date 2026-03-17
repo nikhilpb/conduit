@@ -56,6 +56,14 @@ class SessionMetadataRecord:
     scheduled_job_id: str | None
 
 
+@dataclass(slots=True)
+class ScheduledSessionSummaryRecord:
+    scheduled_job_id: str
+    source_session_id: str
+    summary_text: str
+    created_at: float
+
+
 class SQLiteSessionService(BaseSessionService):
     """Persist ADK sessions, state, and events in SQLite."""
 
@@ -213,6 +221,27 @@ class SQLiteSessionService(BaseSessionService):
                     FOREIGN KEY (app_name, user_id, session_id)
                         REFERENCES sessions(app_name, user_id, session_id)
                         ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS scheduled_session_summaries (
+                    app_name TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    scheduled_job_id TEXT NOT NULL,
+                    source_session_id TEXT NOT NULL,
+                    summary_text TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (app_name, user_id, source_session_id),
+                    FOREIGN KEY (app_name, user_id, source_session_id)
+                        REFERENCES sessions(app_name, user_id, session_id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_scheduled_session_summaries_lookup
+                ON scheduled_session_summaries(
+                    app_name,
+                    user_id,
+                    scheduled_job_id,
+                    created_at DESC
                 );
                 """
             )
@@ -811,6 +840,43 @@ class SQLiteSessionService(BaseSessionService):
             session_id=session_id,
         )
 
+    async def save_scheduled_session_summary(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        scheduled_job_id: str,
+        source_session_id: str,
+        summary_text: str,
+        created_at: float | None = None,
+    ) -> None:
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._save_scheduled_session_summary_sync,
+                app_name=app_name,
+                user_id=user_id,
+                scheduled_job_id=scheduled_job_id,
+                source_session_id=source_session_id,
+                summary_text=summary_text,
+                created_at=created_at,
+            )
+
+    async def list_scheduled_session_summaries(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        scheduled_job_id: str,
+        limit: int,
+    ) -> list[ScheduledSessionSummaryRecord]:
+        return await asyncio.to_thread(
+            self._list_scheduled_session_summaries_sync,
+            app_name=app_name,
+            user_id=user_id,
+            scheduled_job_id=scheduled_job_id,
+            limit=limit,
+        )
+
     def _get_client_turn_sync(
         self,
         *,
@@ -870,6 +936,88 @@ class SQLiteSessionService(BaseSessionService):
             session_kind=row["session_kind"],
             scheduled_job_id=row["scheduled_job_id"],
         )
+
+    def _save_scheduled_session_summary_sync(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        scheduled_job_id: str,
+        source_session_id: str,
+        summary_text: str,
+        created_at: float | None = None,
+    ) -> None:
+        normalized_job_id = scheduled_job_id.strip()
+        normalized_session_id = source_session_id.strip()
+        normalized_summary_text = summary_text.strip()
+        if not normalized_job_id:
+            raise ValueError("scheduled_job_id must be non-empty")
+        if not normalized_session_id:
+            raise ValueError("source_session_id must be non-empty")
+        if not normalized_summary_text:
+            raise ValueError("summary_text must be non-empty")
+
+        summary_created_at = created_at if created_at is not None else time.time()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scheduled_session_summaries (
+                    app_name,
+                    user_id,
+                    scheduled_job_id,
+                    source_session_id,
+                    summary_text,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(app_name, user_id, source_session_id)
+                DO UPDATE SET
+                    scheduled_job_id = excluded.scheduled_job_id,
+                    summary_text = excluded.summary_text,
+                    created_at = excluded.created_at
+                """,
+                (
+                    app_name,
+                    user_id,
+                    normalized_job_id,
+                    normalized_session_id,
+                    normalized_summary_text,
+                    summary_created_at,
+                ),
+            )
+
+    def _list_scheduled_session_summaries_sync(
+        self,
+        *,
+        app_name: str,
+        user_id: str,
+        scheduled_job_id: str,
+        limit: int,
+    ) -> list[ScheduledSessionSummaryRecord]:
+        normalized_job_id = scheduled_job_id.strip()
+        if not normalized_job_id or limit <= 0:
+            return []
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT scheduled_job_id, source_session_id, summary_text, created_at
+                FROM scheduled_session_summaries
+                WHERE app_name = ? AND user_id = ? AND scheduled_job_id = ?
+                ORDER BY created_at DESC, source_session_id DESC
+                LIMIT ?
+                """,
+                (app_name, user_id, normalized_job_id, limit),
+            ).fetchall()
+
+        return [
+            ScheduledSessionSummaryRecord(
+                scheduled_job_id=row["scheduled_job_id"],
+                source_session_id=row["source_session_id"],
+                summary_text=row["summary_text"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     def _save_client_turn_started_sync(
         self,
