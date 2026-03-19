@@ -15,6 +15,7 @@ from conduit.config import Settings
 from conduit.context_estimate import build_context_estimate
 from conduit.main import _build_transcript
 from conduit.main import create_app
+from conduit.runtime import SCHEDULED_SESSION_SUMMARY_MAX_CHARS
 from conduit.runtime import TurnResult
 from conduit.user_context import CURRENT_TIME_STATE_KEY
 from conduit.user_context import LOCATION_STATE_KEY
@@ -434,31 +435,31 @@ scheduled_sessions:
         "scheduled_job_id": "daily-briefing",
         "summaries": [
             {
-                "created_at": summary_context["summaries"][0]["created_at"],
+                "created_at": "1970-01-01 00:00:02 UTC",
                 "summary_text": "summary 2",
             },
             {
-                "created_at": summary_context["summaries"][1]["created_at"],
+                "created_at": "1970-01-01 00:00:03 UTC",
                 "summary_text": "summary 3",
             },
             {
-                "created_at": summary_context["summaries"][2]["created_at"],
+                "created_at": "1970-01-01 00:00:04 UTC",
                 "summary_text": "summary 4",
             },
             {
-                "created_at": summary_context["summaries"][3]["created_at"],
+                "created_at": "1970-01-01 00:00:05 UTC",
                 "summary_text": "summary 5",
             },
             {
-                "created_at": summary_context["summaries"][4]["created_at"],
+                "created_at": "1970-01-01 00:00:06 UTC",
                 "summary_text": "summary 6",
             },
             {
-                "created_at": summary_context["summaries"][5]["created_at"],
+                "created_at": "1970-01-01 00:00:07 UTC",
                 "summary_text": "summary 7",
             },
             {
-                "created_at": summary_context["summaries"][6]["created_at"],
+                "created_at": "1970-01-01 00:00:08 UTC",
                 "summary_text": "summary 8",
             },
         ],
@@ -610,6 +611,80 @@ scheduled_sessions:
 
     assert result.reply == "Scheduled reply."
     assert stored_summaries == []
+
+
+def test_scheduled_session_summary_is_truncated_before_persisting(tmp_path):
+    scheduled_config_path = tmp_path / "scheduled_sessions.yaml"
+    scheduled_config_path.write_text(
+        """
+scheduled_sessions:
+  - id: daily-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Summarize the morning news.
+    allowed_tools:
+      - web_fetch
+"""
+    )
+    app = create_app(
+        Settings(
+            _env_file=None,
+            db_path=str(tmp_path / "conduit.db"),
+            models_config_path=str(tmp_path / "models.yaml"),
+            google_api_key="google-test",
+            scheduled_sessions_config_path=str(scheduled_config_path),
+        )
+    )
+    runtime = app.state.runtime
+
+    async def fake_iter_events(
+        *,
+        session,
+        new_message,
+        invocation_id: str | None = None,
+        state_delta=None,
+        runner=None,
+    ):
+        del invocation_id, runner, state_delta
+        user_event = Event(
+            invocation_id="inv-user",
+            author="user",
+            content=new_message,
+        )
+        await runtime.session_service.append_event(session, user_event)
+        yield user_event
+
+        assistant_event = Event(
+            invocation_id="inv-assistant",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[types.Part(text="Scheduled reply.")],
+            ),
+        )
+        await runtime.session_service.append_event(session, assistant_event)
+        yield assistant_event
+
+    async def fake_summarize(*, model_name: str, reply: str) -> str:
+        del model_name, reply
+        return "word " * (SCHEDULED_SESSION_SUMMARY_MAX_CHARS + 50)
+
+    runtime.iter_events = fake_iter_events  # type: ignore[method-assign]
+    runtime._summarize_scheduled_session_reply = fake_summarize  # type: ignore[method-assign]  # noqa: SLF001
+
+    asyncio.run(runtime.run_scheduled_session("daily-briefing"))
+    stored_summaries = asyncio.run(
+        runtime.session_service.list_scheduled_session_summaries(
+            app_name=runtime.settings.app_name,
+            user_id=runtime.settings.internal_user_id,
+            scheduled_job_id="daily-briefing",
+            limit=20,
+        )
+    )
+
+    assert len(stored_summaries) == 1
+    assert len(stored_summaries[0].summary_text) <= SCHEDULED_SESSION_SUMMARY_MAX_CHARS
+    assert stored_summaries[0].summary_text.endswith("...")
 
 
 def test_list_scheduled_sessions_endpoint(tmp_path):

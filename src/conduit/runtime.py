@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -44,6 +45,7 @@ from conduit.user_context import build_scheduled_session_summaries_state_delta
 
 logger = logging.getLogger(__name__)
 SCHEDULED_SESSION_SUMMARY_CONTEXT_LIMIT = 7
+SCHEDULED_SESSION_SUMMARY_MAX_CHARS = 1200
 
 
 @dataclass(slots=True)
@@ -514,13 +516,18 @@ class ConduitRuntime:
             model_name=scheduled_runtime.definition.model,
             reply=normalized_reply,
         )
-        normalized_summary = summary.strip()
+        normalized_summary = _normalize_scheduled_session_summary(summary)
         if not normalized_summary:
             logger.warning(
                 "Scheduled-session summary generation returned empty text for session %s.",
                 session.id,
             )
             return
+        summary_created_at = (
+            session.last_update_time
+            if session.last_update_time is not None
+            else datetime.now(UTC).timestamp()
+        )
 
         await self.session_service.save_scheduled_session_summary(
             app_name=self.settings.app_name,
@@ -528,7 +535,7 @@ class ConduitRuntime:
             scheduled_job_id=scheduled_runtime.definition.id,
             source_session_id=session.id,
             summary_text=normalized_summary,
-            created_at=session.last_update_time or datetime.now(UTC).timestamp(),
+            created_at=summary_created_at,
         )
 
     async def _summarize_scheduled_session_reply(
@@ -546,16 +553,24 @@ class ConduitRuntime:
             session_id=f"scheduled-summary-{uuid.uuid4().hex}",
         )
         summary_reply = ""
-        async for update in self.stream_turn(
-            session=session,
-            message=(
-                "Summarize this scheduled-session assistant reply for future "
-                f"background context:\n\n{reply}"
-            ),
-            runner=summary_runtime.runner,
-        ):
-            if update.kind == "reply":
-                summary_reply = update.text
+        try:
+            async for update in self.stream_turn(
+                session=session,
+                message=(
+                    "Summarize this scheduled-session assistant reply for future "
+                    f"background context:\n\n{reply}"
+                ),
+                runner=summary_runtime.runner,
+            ):
+                if update.kind == "reply":
+                    summary_reply = update.text
+        finally:
+            with suppress(Exception):
+                await summary_runtime.session_service.delete_session(
+                    app_name=summary_runtime.app.name,
+                    user_id=self.settings.internal_user_id,
+                    session_id=session.id,
+                )
         return summary_reply
 
     def _get_scheduled_session_summary_runtime(
@@ -574,7 +589,6 @@ class ConduitRuntime:
                 self.settings,
                 model_name=model_name,
             ),
-            resumability_config=ResumabilityConfig(is_resumable=True),
         )
         runtime = ScheduledSessionSummaryRuntime(
             app=app,
@@ -626,3 +640,17 @@ def _extract_text(content: types.Content | None) -> str:
 def _format_scheduled_session_summary_timestamp(created_at: float) -> str:
     resolved_created_at = datetime.fromtimestamp(created_at, tz=UTC)
     return resolved_created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _normalize_scheduled_session_summary(summary: str) -> str:
+    normalized_summary = " ".join(summary.split())
+    if not normalized_summary:
+        return ""
+    if len(normalized_summary) <= SCHEDULED_SESSION_SUMMARY_MAX_CHARS:
+        return normalized_summary
+
+    truncated_summary = normalized_summary[:SCHEDULED_SESSION_SUMMARY_MAX_CHARS].rstrip()
+    if " " in truncated_summary:
+        truncated_summary = truncated_summary.rsplit(" ", 1)[0]
+    truncated_summary = truncated_summary.rstrip(".,;:!? ")
+    return f"{truncated_summary}..."
