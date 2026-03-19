@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from typing import Any
+from typing import Iterable
 
 from google.adk.sessions.state import State
 
@@ -13,6 +14,9 @@ CURRENT_TIME_STATE_KEY = "conduit:current_time"
 LOCATION_STATE_KEY = State.USER_PREFIX + "conduit_location"
 PERSONAL_INSTRUCTIONS_STATE_KEY = (
     State.USER_PREFIX + "conduit_personal_instructions"
+)
+SCHEDULED_SESSION_SUMMARIES_STATE_KEY = (
+    State.TEMP_PREFIX + "conduit_scheduled_session_summaries"
 )
 
 
@@ -57,6 +61,42 @@ def build_current_time_state_delta(
 
     return {
         CURRENT_TIME_STATE_KEY: format_current_time(resolved_current_time)
+    }
+
+
+def build_scheduled_session_summaries_state_delta(
+    scheduled_job_id: str,
+    summaries: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a temp state delta with prior scheduled-session summaries."""
+
+    normalized_job_id = scheduled_job_id.strip()
+    if not normalized_job_id:
+        return {}
+
+    normalized_summaries: list[dict[str, str]] = []
+    for summary in summaries:
+        if not isinstance(summary, dict):
+            continue
+        created_at = _coerce_string(summary.get("created_at"))
+        summary_text = _coerce_string(summary.get("summary_text"))
+        if not created_at or not summary_text:
+            continue
+        normalized_summaries.append(
+            {
+                "created_at": created_at,
+                "summary_text": summary_text,
+            }
+        )
+
+    if not normalized_summaries:
+        return {}
+
+    return {
+        SCHEDULED_SESSION_SUMMARIES_STATE_KEY: {
+            "scheduled_job_id": normalized_job_id,
+            "summaries": normalized_summaries,
+        }
     }
 
 
@@ -113,6 +153,10 @@ def build_context_instructions(state: Any) -> list[str]:
             f"{personal_instructions}"
         )
 
+    scheduled_session_summaries = _scheduled_session_summaries_instruction(state)
+    if scheduled_session_summaries:
+        instructions.append(scheduled_session_summaries)
+
     return instructions
 
 
@@ -146,6 +190,43 @@ def _safe_get(state: Any, key: str) -> str:
     if not isinstance(value, str):
         return ""
     return value.strip()
+
+
+def _scheduled_session_summaries_instruction(state: Any) -> str:
+    if state is None:
+        return ""
+
+    try:
+        payload = state.get(SCHEDULED_SESSION_SUMMARIES_STATE_KEY)
+    except AttributeError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+
+    scheduled_job_id = _coerce_string(payload.get("scheduled_job_id"))
+    raw_summaries = payload.get("summaries")
+    if not scheduled_job_id or not isinstance(raw_summaries, list):
+        return ""
+
+    formatted_summaries: list[str] = []
+    for raw_summary in raw_summaries:
+        if not isinstance(raw_summary, dict):
+            continue
+        created_at = _coerce_string(raw_summary.get("created_at"))
+        summary_text = _coerce_string(raw_summary.get("summary_text"))
+        if not created_at or not summary_text:
+            continue
+        formatted_summaries.append(f"- {created_at}: {summary_text}")
+
+    if not formatted_summaries:
+        return ""
+
+    return (
+        "Recent summaries from prior runs of scheduled session "
+        f"`{scheduled_job_id}`. Use them as background context only, "
+        "and prefer current-run evidence if anything conflicts.\n"
+        + "\n".join(formatted_summaries)
+    )
 
 
 def _coerce_string(value: Any) -> str:

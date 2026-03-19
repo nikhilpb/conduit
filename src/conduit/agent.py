@@ -40,19 +40,9 @@ def build_root_agent(
     )
     tools = [tool_registry[tool_name] for tool_name in selected_tool_names]
 
-    provider = infer_provider(model_name)
-    model = model_name
-    if provider == "anthropic":
-        model = ConduitAnthropicLlm(
-            model=model_name,
-            max_tokens=settings.anthropic_max_tokens,
-            thinking_budget_tokens=settings.anthropic_thinking_budget_tokens,
-            interleaved_thinking=settings.anthropic_interleaved_thinking,
-        )
-
     return Agent(
         name="conduit",
-        model=model,
+        model=_build_model(settings, model_name=model_name),
         description=_build_agent_description(selected_tool_names),
         instruction=_build_agent_instruction(
             selected_tool_names,
@@ -64,6 +54,30 @@ def build_root_agent(
             auto_approve_tools=auto_approve_tools,
         ),
         tools=tools,
+    )
+
+
+def build_scheduled_summary_agent(
+    settings: Settings,
+    *,
+    model_name: str,
+) -> Agent:
+    """Build the internal agent used to summarize scheduled-session replies."""
+
+    return Agent(
+        name="conduit_scheduled_session_summarizer",
+        model=_build_model(settings, model_name=model_name),
+        description="Summarizes scheduled session replies for internal memory.",
+        instruction=(
+            "You summarize one scheduled-session assistant reply for reuse as "
+            "future background context. Write plain text only with no markdown, "
+            "headings, or bullets. Keep the summary to 2-4 sentences. Preserve "
+            "concrete dates, names, numbers, probabilities, and other facts when "
+            "present. Focus on the substantive findings and what should carry "
+            "forward into future runs. Do not mention tools, prompts, or that you "
+            "are summarizing another response."
+        ),
+        tools=[],
     )
 
 
@@ -178,6 +192,18 @@ def _select_tool_names(
     return tuple(
         tool_name for tool_name in tool_registry if tool_name in allowed_tool_names
     )
+
+
+def _build_model(settings: Settings, *, model_name: str) -> str | ConduitAnthropicLlm:
+    provider = infer_provider(model_name)
+    if provider == "anthropic":
+        return ConduitAnthropicLlm(
+            model=model_name,
+            max_tokens=settings.anthropic_max_tokens,
+            thinking_budget_tokens=settings.anthropic_thinking_budget_tokens,
+            interleaved_thinking=settings.anthropic_interleaved_thinking,
+        )
+    return model_name
 
 
 def _build_agent_description(tool_names: tuple[str, ...]) -> str:
