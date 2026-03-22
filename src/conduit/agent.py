@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Collection
+from typing import Any
 
 from google.adk.agents.context import Context
 from google.adk.agents import Agent
 from google.adk.models.llm_request import LlmRequest
-from google.adk.tools import AgentTool
+from google.adk.tools import FunctionTool
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
+from google.genai import types
 from pydantic import BaseModel
 from pydantic import Field
 
@@ -57,6 +61,14 @@ class ResearchReport(BaseModel):
         default=None,
         description="Optional note about missing, weak, or conflicting evidence.",
     )
+
+
+_JSON_FENCE_PATTERN = re.compile(
+    r"```(?:json)?\s*(\{.*\})\s*```",
+    re.DOTALL | re.IGNORECASE,
+)
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
 
 
 def build_root_agent(
@@ -194,7 +206,7 @@ def _build_root_tools(
         selected_tool_names=selected_tool_names,
         auto_approve_tools=auto_approve_tools,
     )
-    research_tool: AgentTool | None = None
+    research_tool: FunctionTool | None = None
     sub_agents: tuple[Agent, ...] = ()
     if research_tool_enabled:
         research_agent = _build_research_agent(
@@ -205,7 +217,7 @@ def _build_root_tools(
             before_model_callback=before_model_callback,
             before_tool_callback=before_tool_callback,
         )
-        research_tool = AgentTool(research_agent, skip_summarization=True)
+        research_tool = _build_research_tool(research_agent)
         sub_agents = (research_agent,)
 
     root_tools: list[object] = []
@@ -377,6 +389,245 @@ def _build_agent_instruction(
     return "".join(instruction_parts)
 
 
+def _build_research_tool(research_agent: Agent) -> FunctionTool:
+    async def research(request: str, tool_context: ToolContext) -> dict[str, Any]:
+        """Delegate a scoped web research task and return a structured subreport."""
+
+        tool_context.actions.skip_summarization = True
+
+        cleaned_request = request.strip()
+        if not cleaned_request:
+            return {
+                "error": "request must be a non-empty string",
+            }
+
+        return await _run_research_agent(
+            research_agent,
+            request=cleaned_request,
+            tool_context=tool_context,
+        )
+
+    return FunctionTool(research)
+
+
+async def _run_research_agent(
+    research_agent: Agent,
+    *,
+    request: str,
+    tool_context: ToolContext,
+) -> dict[str, Any]:
+    from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
+    from google.adk.runners import Runner
+    from google.adk.sessions.in_memory_session_service import InMemorySessionService
+    from google.adk.tools._forwarding_artifact_service import ForwardingArtifactService
+    from google.adk.utils.context_utils import Aclosing
+
+    invocation_context = tool_context._invocation_context
+    if invocation_context is None:
+        return {
+            "error": "research tool cannot run without an invocation context",
+        }
+
+    content = types.Content(
+        role="user",
+        parts=[
+            types.Part.from_text(
+                text=ResearchRequest(request=request).model_dump_json(
+                    exclude_none=True
+                )
+            )
+        ],
+    )
+
+    child_app_name = invocation_context.app_name or research_agent.name
+    runner = Runner(
+        app_name=child_app_name,
+        agent=research_agent,
+        artifact_service=ForwardingArtifactService(tool_context),
+        session_service=InMemorySessionService(),
+        memory_service=InMemoryMemoryService(),
+        credential_service=invocation_context.credential_service,
+        plugins=invocation_context.plugin_manager.plugins,
+    )
+
+    state_dict = {
+        key: value
+        for key, value in tool_context.state.to_dict().items()
+        if not key.startswith("_adk")
+    }
+    session = await runner.session_service.create_session(
+        app_name=child_app_name,
+        user_id=invocation_context.user_id,
+        state=state_dict,
+    )
+
+    last_content = None
+    try:
+        async with Aclosing(
+            runner.run_async(
+                user_id=session.user_id,
+                session_id=session.id,
+                new_message=content,
+            )
+        ) as events:
+            async for event in events:
+                if event.actions.state_delta:
+                    tool_context.state.update(event.actions.state_delta)
+                if event.content:
+                    last_content = event.content
+    finally:
+        await runner.close()
+
+    merged_text = ""
+    if last_content is not None and last_content.parts is not None:
+        merged_text = "\n".join(
+            part.text for part in last_content.parts if part.text and not part.thought
+        )
+
+    return _parse_research_report(merged_text)
+
+
+def _parse_research_report(raw_text: str) -> dict[str, Any]:
+    stripped_text = raw_text.strip()
+    for candidate in _candidate_research_payloads(stripped_text):
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+        try:
+            report = ResearchReport.model_validate(
+                _normalize_research_payload(payload)
+            )
+        except ValueError:
+            continue
+
+        return report.model_dump(exclude_none=True)
+
+    return _fallback_research_report(stripped_text)
+
+
+def _candidate_research_payloads(raw_text: str) -> tuple[str, ...]:
+    candidates: list[str] = []
+
+    def add_candidate(candidate: str) -> None:
+        cleaned = candidate.strip()
+        if cleaned and cleaned not in candidates:
+            candidates.append(cleaned)
+
+    add_candidate(raw_text)
+
+    for match in _JSON_FENCE_PATTERN.finditer(raw_text):
+        add_candidate(match.group(1))
+
+    start = raw_text.find("{")
+    end = raw_text.rfind("}")
+    if start != -1 and end > start:
+        add_candidate(raw_text[start : end + 1])
+
+    return tuple(candidates)
+
+
+def _normalize_research_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("research payload must be a JSON object")
+
+    report_markdown = payload.get("report_markdown")
+    if report_markdown is None:
+        report_markdown = payload.get("report") or payload.get("markdown")
+    if not isinstance(report_markdown, str) or not report_markdown.strip():
+        raise ValueError("research payload is missing report_markdown")
+
+    normalized_sources = _normalize_research_sources(payload.get("sources"))
+    if not normalized_sources:
+        normalized_sources = _extract_sources(report_markdown)
+
+    gaps = payload.get("gaps")
+    if gaps is None:
+        gaps = payload.get("evidence_gaps")
+    if gaps is not None:
+        gaps = str(gaps).strip() or None
+
+    return {
+        "report_markdown": report_markdown.strip(),
+        "sources": normalized_sources,
+        "gaps": gaps,
+    }
+
+
+def _normalize_research_sources(raw_sources: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_sources, list):
+        return []
+
+    sources: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for item in raw_sources:
+        if isinstance(item, str):
+            title = item.strip()
+            url = title
+        elif isinstance(item, dict):
+            url = str(item.get("url") or item.get("link") or "").strip()
+            title = str(
+                item.get("title") or item.get("name") or item.get("label") or url
+            ).strip()
+        else:
+            continue
+
+        if not title or not url or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+        sources.append(
+            {
+                "title": title,
+                "url": url,
+            }
+        )
+
+    return sources
+
+
+def _fallback_research_report(raw_text: str) -> dict[str, Any]:
+    report_markdown = raw_text or "Research worker returned no report."
+    report = ResearchReport(
+        report_markdown=report_markdown,
+        sources=_extract_sources(report_markdown),
+        gaps=(
+            "Research worker returned unstructured output; preserved the raw "
+            "report text."
+        ),
+    )
+    return report.model_dump(exclude_none=True)
+
+
+def _extract_sources(text: str) -> list[dict[str, str]]:
+    sources: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+
+    def add_source(title: str, url: str) -> None:
+        cleaned_url = url.strip().rstrip(".,")
+        cleaned_title = title.strip()
+        if cleaned_title == url.strip():
+            cleaned_title = cleaned_url
+        if not cleaned_title or not cleaned_url or cleaned_url in seen_urls:
+            return
+        seen_urls.add(cleaned_url)
+        sources.append(
+            {
+                "title": cleaned_title,
+                "url": cleaned_url,
+            }
+        )
+
+    for title, url in _MARKDOWN_LINK_PATTERN.findall(text):
+        add_source(title, url)
+
+    for url in _URL_PATTERN.findall(text):
+        add_source(url, url)
+
+    return sources
+
+
 def _build_research_agent(
     settings: Settings,
     *,
@@ -396,17 +647,17 @@ def _build_research_agent(
         instruction=(
             "You are Research, a specialized web research worker. "
             "Use web_search to discover current sources and web_fetch to inspect pages in detail. "
-            "Return only structured output matching the schema. "
+            "After you finish using tools, reply with JSON only and no Markdown code fence. "
+            'Use this exact shape: {"report_markdown":"...","sources":[{"title":"...","url":"..."}],"gaps":"..."} '
             "report_markdown must be citation-grounded Markdown with inline Markdown-link citations. "
             "Prefer citing fetched page URLs over raw search-result snippets whenever you have fetched the page. "
             "sources must list the distinct sources actually used in the report. "
-            "Set gaps when evidence is weak, missing, or conflicting."
+            "Set gaps to null or omit it when evidence is strong and complete."
         ),
         before_model_callback=before_model_callback,
         before_tool_callback=before_tool_callback,
         tools=[web_search_tool, web_fetch_tool],
         input_schema=ResearchRequest,
-        output_schema=ResearchReport,
         disallow_transfer_to_parent=True,
         disallow_transfer_to_peers=True,
     )
