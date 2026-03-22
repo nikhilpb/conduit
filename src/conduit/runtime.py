@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import field
-from datetime import UTC
 from datetime import datetime
 from typing import Any
 from typing import AsyncIterator
@@ -17,13 +15,11 @@ from google.adk.apps import App
 from google.adk.apps import ResumabilityConfig
 from google.adk.events.event import Event
 from google.adk.runners import Runner
-from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.adk.sessions.session import Session
 from google.genai import types
 
 import logging
 
-from conduit.agent import build_scheduled_summary_agent
 from conduit.agent import build_root_agent
 from conduit.config import Settings
 from conduit.context_estimate import ContextEstimate
@@ -41,11 +37,8 @@ from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 from conduit.tool_permissions import effective_tool_permission
 from conduit.user_context import build_current_time_state_delta
-from conduit.user_context import build_scheduled_session_summaries_state_delta
 
 logger = logging.getLogger(__name__)
-SCHEDULED_SESSION_SUMMARY_CONTEXT_LIMIT = 7
-SCHEDULED_SESSION_SUMMARY_MAX_CHARS = 1200
 
 
 @dataclass(slots=True)
@@ -75,13 +68,6 @@ class ScheduledSessionRuntime:
     runner: Runner
 
 
-@dataclass(slots=True)
-class ScheduledSessionSummaryRuntime:
-    app: App
-    runner: Runner
-    session_service: InMemorySessionService
-
-
 class ConduitRuntime:
     """Thin wrapper around ADK's runner and session service."""
 
@@ -100,9 +86,6 @@ class ConduitRuntime:
         )
         self._apply_model_registry(self._model_registry)
         self._scheduled_session_runtimes = self._build_scheduled_session_runtimes()
-        self._scheduled_session_summary_runtimes: dict[
-            str, ScheduledSessionSummaryRuntime
-        ] = {}
 
     @property
     def active_model(self) -> ModelOption:
@@ -346,10 +329,6 @@ class ConduitRuntime:
             scheduled_runtime.definition.model,
             ", ".join(scheduled_runtime.definition.allowed_tools),
         )
-        state_delta = await self._build_scheduled_session_state_delta(
-            scheduled_job_id=scheduled_job_id,
-            current_time=current_time,
-        )
         session = await self.create_session(
             session_kind="scheduled",
             scheduled_job_id=scheduled_job_id,
@@ -359,25 +338,12 @@ class ConduitRuntime:
             session.id,
             scheduled_job_id,
         )
-        result = await self._run_session_turn(
+        return await self._run_session_turn(
             session=session,
             message=scheduled_runtime.definition.seed_query,
             runner=scheduled_runtime.runner,
-            state_delta=state_delta,
+            state_delta=build_current_time_state_delta(current_time),
         )
-        try:
-            await self._persist_scheduled_session_summary(
-                scheduled_runtime=scheduled_runtime,
-                session=session,
-                reply=result.reply,
-            )
-        except Exception:  # pragma: no cover - defensive logging
-            logger.exception(
-                "Failed to persist scheduled-session summary for job %s (session_id=%s).",
-                scheduled_job_id,
-                session.id,
-            )
-        return result
 
     async def _run_session_turn(
         self,
@@ -469,135 +435,6 @@ class ConduitRuntime:
             )
         return scheduled_runtimes
 
-    async def _build_scheduled_session_state_delta(
-        self,
-        *,
-        scheduled_job_id: str,
-        current_time: datetime | None,
-    ) -> dict[str, Any]:
-        state_delta: dict[str, Any] = build_current_time_state_delta(current_time)
-        summaries = await self.session_service.list_scheduled_session_summaries(
-            app_name=self.settings.app_name,
-            user_id=self.settings.internal_user_id,
-            scheduled_job_id=scheduled_job_id,
-            limit=SCHEDULED_SESSION_SUMMARY_CONTEXT_LIMIT,
-        )
-        if not summaries:
-            return state_delta
-
-        state_delta.update(
-            build_scheduled_session_summaries_state_delta(
-                scheduled_job_id,
-                [
-                    {
-                        "created_at": _format_scheduled_session_summary_timestamp(
-                            summary.created_at
-                        ),
-                        "summary_text": summary.summary_text,
-                    }
-                    for summary in reversed(summaries)
-                ],
-            )
-        )
-        return state_delta
-
-    async def _persist_scheduled_session_summary(
-        self,
-        *,
-        scheduled_runtime: ScheduledSessionRuntime,
-        session: Session,
-        reply: str,
-    ) -> None:
-        normalized_reply = reply.strip()
-        if not normalized_reply:
-            return
-
-        summary = await self._summarize_scheduled_session_reply(
-            model_name=scheduled_runtime.definition.model,
-            reply=normalized_reply,
-        )
-        normalized_summary = _normalize_scheduled_session_summary(summary)
-        if not normalized_summary:
-            logger.warning(
-                "Scheduled-session summary generation returned empty text for session %s.",
-                session.id,
-            )
-            return
-        summary_created_at = (
-            session.last_update_time
-            if session.last_update_time is not None
-            else datetime.now(UTC).timestamp()
-        )
-
-        await self.session_service.save_scheduled_session_summary(
-            app_name=self.settings.app_name,
-            user_id=self.settings.internal_user_id,
-            scheduled_job_id=scheduled_runtime.definition.id,
-            source_session_id=session.id,
-            summary_text=normalized_summary,
-            created_at=summary_created_at,
-        )
-
-    async def _summarize_scheduled_session_reply(
-        self,
-        *,
-        model_name: str,
-        reply: str,
-    ) -> str:
-        summary_runtime = self._get_scheduled_session_summary_runtime(
-            model_name=model_name,
-        )
-        session = await summary_runtime.session_service.create_session(
-            app_name=summary_runtime.app.name,
-            user_id=self.settings.internal_user_id,
-            session_id=f"scheduled-summary-{uuid.uuid4().hex}",
-        )
-        summary_reply = ""
-        try:
-            async for update in self.stream_turn(
-                session=session,
-                message=(
-                    "Summarize this scheduled-session assistant reply for future "
-                    f"background context:\n\n{reply}"
-                ),
-                runner=summary_runtime.runner,
-            ):
-                if update.kind == "reply":
-                    summary_reply = update.text
-        finally:
-            with suppress(Exception):
-                await summary_runtime.session_service.delete_session(
-                    app_name=summary_runtime.app.name,
-                    user_id=self.settings.internal_user_id,
-                    session_id=session.id,
-                )
-        return summary_reply
-
-    def _get_scheduled_session_summary_runtime(
-        self,
-        *,
-        model_name: str,
-    ) -> ScheduledSessionSummaryRuntime:
-        existing_runtime = self._scheduled_session_summary_runtimes.get(model_name)
-        if existing_runtime is not None:
-            return existing_runtime
-
-        session_service = InMemorySessionService()
-        app = App(
-            name=f"{self.settings.app_name}_scheduled_summary",
-            root_agent=build_scheduled_summary_agent(
-                self.settings,
-                model_name=model_name,
-            ),
-        )
-        runtime = ScheduledSessionSummaryRuntime(
-            app=app,
-            runner=Runner(app=app, session_service=session_service),
-            session_service=session_service,
-        )
-        self._scheduled_session_summary_runtimes[model_name] = runtime
-        return runtime
-
     def _build_runner(
         self,
         *,
@@ -635,22 +472,3 @@ def _extract_text(content: types.Content | None) -> str:
         if part.text and not getattr(part, "thought", False)
     ]
     return "\n".join(part for part in parts if part).strip()
-
-
-def _format_scheduled_session_summary_timestamp(created_at: float) -> str:
-    resolved_created_at = datetime.fromtimestamp(created_at, tz=UTC)
-    return resolved_created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-
-
-def _normalize_scheduled_session_summary(summary: str) -> str:
-    normalized_summary = " ".join(summary.split())
-    if not normalized_summary:
-        return ""
-    if len(normalized_summary) <= SCHEDULED_SESSION_SUMMARY_MAX_CHARS:
-        return normalized_summary
-
-    truncated_summary = normalized_summary[:SCHEDULED_SESSION_SUMMARY_MAX_CHARS].rstrip()
-    if " " in truncated_summary:
-        truncated_summary = truncated_summary.rsplit(" ", 1)[0]
-    truncated_summary = truncated_summary.rstrip(".,;:!? ")
-    return f"{truncated_summary}..."
