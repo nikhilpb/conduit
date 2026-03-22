@@ -53,21 +53,6 @@ void main() {
             ],
           },
           {
-            'message_id': 'assistant-transfer',
-            'role': 'assistant',
-            'text': '',
-            'created_at': 3.5,
-            'thinking_trace': '',
-            'tool_calls': [
-              {
-                'tool_call_id': 'transfer-call',
-                'name': 'transfer_to_agent',
-                'args': {'agent_name': 'research'},
-                'status': 'completed',
-              },
-            ],
-          },
-          {
             'message_id': 'assistant-bash-call',
             'role': 'assistant',
             'text': '',

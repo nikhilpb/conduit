@@ -54,10 +54,7 @@ class SessionSummary {
   final String title;
 }
 
-const Set<String> _hiddenToolCallNames = {
-  'adk_request_confirmation',
-  'transfer_to_agent',
-};
+const Set<String> _hiddenToolCallNames = {'adk_request_confirmation'};
 
 bool isVisibleToolCallName(String? name) {
   return name != null && !_hiddenToolCallNames.contains(name);
