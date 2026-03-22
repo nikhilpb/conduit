@@ -3,7 +3,7 @@ import 'package:think_client/models.dart';
 
 void main() {
   test(
-    'session transcript hides approval-only entries and bash result-only entries',
+    'session transcript hides internal-only entries and bash result-only entries',
     () {
       final detail = SessionDetail.fromJson({
         'session_id': 'session-1',
@@ -49,6 +49,21 @@ void main() {
                 'args': const {},
                 'status': 'completed',
                 'response': {'confirmed': true},
+              },
+            ],
+          },
+          {
+            'message_id': 'assistant-transfer',
+            'role': 'assistant',
+            'text': '',
+            'created_at': 3.5,
+            'thinking_trace': '',
+            'tool_calls': [
+              {
+                'tool_call_id': 'transfer-call',
+                'name': 'transfer_to_agent',
+                'args': {'agent_name': 'research'},
+                'status': 'completed',
               },
             ],
           },
