@@ -16,6 +16,7 @@ from conduit.model_registry import infer_provider
 from conduit.tool_permissions import effective_tool_permission
 from conduit.tool_permissions import permission_summary
 from conduit.tools.bash import build_bash_tool
+from conduit.tools.memory_search import build_memory_search_tool
 from conduit.tools.polymarket import build_polymarket_tools
 from conduit.tools.recipe_lookup import build_recipe_lookup_tool
 from conduit.tools.web_fetch import build_web_fetch_tool
@@ -150,6 +151,7 @@ def _build_tool_registry(
     tool_registry: dict[str, object] = {
         "web_search": build_web_search_tool(settings),
         "web_fetch": build_web_fetch_tool(settings),
+        "memory_search": build_memory_search_tool(settings),
     }
     if enable_bash:
         tool_registry["bash"] = build_bash_tool(settings)
@@ -186,6 +188,8 @@ def _build_agent_description(tool_names: tuple[str, ...]) -> str:
         capabilities.append("search the web")
     if "web_fetch" in tool_names:
         capabilities.append("fetch webpages")
+    if "memory_search" in tool_names:
+        capabilities.append("search saved notes from local memory")
     if "bash" in tool_names:
         capabilities.append("run Bash commands on the host")
     if any(tool_name.startswith("polymarket_") for tool_name in tool_names):
@@ -220,6 +224,39 @@ def _build_agent_instruction(
         instruction_parts.append(
             "Use web_fetch when you need to inspect a specific page or URL in detail. "
         )
+    if "memory_search" in tool_names:
+        instruction_parts.extend(
+            [
+                "Use memory_search before you answer questions about what you remember, ",
+                "the user's saved preferences, or prior saved facts. ",
+                "memory_search only searches the local memory/memory.md file, so do not ",
+                "claim something is remembered unless it appears in the current conversation ",
+                "or in that file. ",
+            ]
+        )
+        if "bash" in tool_names:
+            instruction_parts.extend(
+                [
+                    "When the user explicitly asks you to remember something or take a note, ",
+                    "or when you learn a stable user preference likely to matter later, update ",
+                    "memory/memory.md using bash. ",
+                    "Before writing, use memory_search or inspect the file so you do not create ",
+                    "duplicate notes. ",
+                    "Create the memory directory and file if they do not exist. ",
+                    "Keep Markdown headings `## User Preferences` and `## Notes`, and append ",
+                    "concise dated bullet points under the appropriate heading. ",
+                    "Do not store transient one-off facts unless the user explicitly asks you ",
+                    "to save them. ",
+                ]
+            )
+        else:
+            instruction_parts.extend(
+                [
+                    "This surface does not expose bash, so you cannot persist new notes to ",
+                    "memory/memory.md here; say that clearly instead of pretending you saved ",
+                    "something. ",
+                ]
+            )
     if "bash" in tool_names:
         instruction_parts.append(
             "Use bash when you need to inspect or operate on the local host computer. "

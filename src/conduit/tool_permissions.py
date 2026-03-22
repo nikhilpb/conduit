@@ -16,6 +16,7 @@ DEFAULT_TOOL_PERMISSIONS: dict[str, ToolPermissionMode] = {
     "bash": "ask",
     "web_search": "allow",
     "web_fetch": "allow",
+    "memory_search": "allow",
     "polymarket_search_markets": "allow",
     "polymarket_list_markets": "allow",
     "polymarket_get_market": "allow",

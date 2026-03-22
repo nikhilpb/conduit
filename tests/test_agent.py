@@ -26,12 +26,15 @@ def test_build_root_agent_includes_registered_tools():
     assert "bash" in tool_names
     assert "web_search" in tool_names
     assert "web_fetch" in tool_names
+    assert "memory_search" in tool_names
     assert "polymarket_search_markets" in tool_names
     assert "polymarket_list_markets" in tool_names
     assert "polymarket_get_market" in tool_names
     assert "polymarket_get_price_history" in tool_names
     assert "every bash call requires explicit user confirmation" in agent.instruction
     assert "do not claim the output was missing" in agent.instruction
+    assert "Use memory_search before you answer questions about what you remember" in agent.instruction
+    assert "update memory/memory.md using bash" in agent.instruction
     assert "future-looking probabilities" in agent.instruction
     assert "check Polymarket first when it is relevant" in agent.instruction
 
@@ -93,7 +96,9 @@ def test_build_root_agent_can_disable_bash():
     ]
 
     assert "bash" not in tool_names
+    assert "memory_search" in tool_names
     assert "Use bash when you need to inspect" not in agent.instruction
+    assert "cannot persist new notes to memory/memory.md here" in agent.instruction
 
 
 def test_runtime_uses_bash_only_for_websocket_runner(tmp_path):

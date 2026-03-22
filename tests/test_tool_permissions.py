@@ -20,6 +20,7 @@ tools:
     assert permissions["bash"] == "ask"
     assert permissions["web_search"] == "allow"
     assert permissions["web_fetch"] == "ask"
+    assert permissions["memory_search"] == "allow"
     assert permissions["polymarket_search_markets"] == "allow"
     assert permissions["polymarket_list_markets"] == "allow"
     assert permissions["polymarket_get_market"] == "allow"

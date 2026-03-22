@@ -111,6 +111,39 @@ scheduled_sessions:
         )
 
 
+def test_load_scheduled_sessions_accepts_memory_search_tool(tmp_path):
+    config_path = tmp_path / "scheduled_sessions.yaml"
+    config_path.write_text(
+        """
+scheduled_sessions:
+  - id: memory-briefing
+    schedule: "0 9 * * *"
+    model: gemini-3-flash-preview
+    seed_query: Check saved notes before summarizing.
+    allowed_tools:
+      - memory_search
+"""
+    )
+
+    definitions = load_scheduled_sessions(
+        str(config_path),
+        settings=Settings(
+            _env_file=None,
+            google_api_key="google-test",
+        ),
+    )
+
+    assert definitions == (
+        ScheduledSessionDefinition(
+            id="memory-briefing",
+            schedule="0 9 * * *",
+            model="gemini-3-flash-preview",
+            seed_query="Check saved notes before summarizing.",
+            allowed_tools=("memory_search",),
+        ),
+    )
+
+
 def test_load_scheduled_sessions_rejects_missing_provider_credentials(
     tmp_path,
     monkeypatch,
