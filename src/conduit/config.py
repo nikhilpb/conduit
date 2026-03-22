@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     db_path: str = "data/conduit.db"
     tool_permissions_path: str = "config/tools.yaml"
     scheduled_sessions_config_path: str = "config/scheduled_sessions.yaml"
+    memory_file_path: str = "memory/memory.md"
     internal_user_id: str = "single-user"
     anthropic_max_tokens: int = 8192
     anthropic_thinking_budget_tokens: int = 2048

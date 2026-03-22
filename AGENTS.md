@@ -28,8 +28,10 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - `research`: visible root-level tool that delegates web-research subtasks to the child `research` agent when both web tools are server-allowed.
   - `web_search`: Brave Search API first, Ecosia HTML fallback. This is exposed directly on the root agent only when the `research` worker is not active; otherwise it is owned by the child `research` agent.
   - `web_fetch`: HTTP/HTML/text fetch with cleaned content extraction. This is exposed directly on the root agent only when the `research` worker is not active; otherwise it is owned by the child `research` agent.
+  - `memory_search`: read-only search over the local `memory/memory.md` Markdown file.
   - `polymarket_search_markets` / `polymarket_list_markets` / `polymarket_get_market` / `polymarket_get_price_history`: public Polymarket market lookup, current pricing, price history, liquidity, and volume snapshots.
   - `recipe_lookup`: read-only lookup against a local `recipes.json` catalog when `config/recipes.yaml` resolves to an existing file.
+  - The root agent treats `memory/memory.md` as per-worktree local memory. It searches that file on demand through `memory_search`, and only writes to it through `bash` when that tool is available.
 - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - The root agent is responsible for the final user-facing response. Research-heavy answers are expected to be synthesized into one Markdown report with inline citations and a short sources section after any delegated `research` subtasks complete.
 - Model choice is server-owned and persisted in `config/models.yaml`.
@@ -78,6 +80,8 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 - `src/conduit/context_estimate.py`
   - Deterministic character/token estimation for app-facing context usage.
   - Counts session text plus non-internal tool calls/results with a fixed chars-per-token ratio.
+- `src/conduit/agent_memory.py`
+  - Resolves the configured memory-file path and performs simple line-based memory search.
 - `src/conduit/tool_permissions.py`
   - Loads `allow` / `ask` / `deny` policy from `config/tools.yaml`.
   - Enforces that `bash` stays approval-gated even if configured as `allow`.
@@ -94,6 +98,8 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - Brave Search API with Ecosia HTML fallback; normalizes navigational queries.
 - `src/conduit/tools/web_fetch.py`
   - HTTP fetch with HTML cleaning via BeautifulSoup; returns structured content or error payloads.
+- `src/conduit/tools/memory_search.py`
+  - Searches `memory/memory.md` with case-insensitive line matching and compact scored snippets.
 - `src/conduit/tools/polymarket.py`
   - Public Polymarket Gamma/CLOB API integration for market lookup and pricing history.
 - `src/conduit/tools/recipe_lookup.py`
@@ -128,6 +134,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 - Session records include `session_kind` (`interactive` or `scheduled`) and an optional `scheduled_job_id`.
 - `bash` tool results preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, but the Flutter client does not render inline bash output; it keeps a single bash invocation chip in history and in live turns.
 - The websocket/interactive chat runner exposes `bash`; the plain HTTP `/chat` runner intentionally excludes `bash` because that surface cannot complete approval handshakes.
+- Because HTTP chat excludes `bash`, it can search `memory/memory.md` but cannot persist new notes there; the websocket runner and ADK Web can save notes after bash approval.
 - Scheduled runners are separate headless ADK runners: they use only their configured `allowed_tools` list and auto-approve those tools, including `bash`.
 - Chat composer shows the currently active model label.
 - Chat composer shows an estimated next-turn context token count and a soft usage bar based on completed session history, the current draft, and hidden per-turn context.
@@ -152,6 +159,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`
   - scheduled session config: `config/scheduled_sessions.yaml`
+  - local memory file: `memory/memory.md` (gitignored, created lazily)
   - recipe catalog config: `config/recipes.yaml`
   - tool permissions: `config/tools.yaml`
   - Codex workspace mount in Docker: `/workspace`
