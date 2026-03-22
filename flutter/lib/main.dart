@@ -2586,12 +2586,6 @@ String _toolCallLabel(ToolCall toolCall) {
     case 'web_fetch':
       final url = (toolCall.args['url'] as String?)?.trim() ?? 'url';
       return 'web_fetch(${_shortenUrl(url)})';
-    case 'research':
-      final request = _ellipsize(
-        (toolCall.args['request'] as String?)?.trim() ?? 'request',
-        38,
-      );
-      return 'Research($request)';
     default:
       return toolCall.name;
   }

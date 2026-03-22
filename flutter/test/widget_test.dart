@@ -37,7 +37,7 @@ void main() {
     expect(find.text('Configure server'), findsOneWidget);
   });
 
-  testWidgets('renders research tool chips with a friendly label', (
+  testWidgets('renders bash tool chips with a friendly label', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -45,9 +45,9 @@ void main() {
         home: Scaffold(
           body: ToolChip(
             toolCall: ToolCall(
-              toolCallId: 'research-1',
-              name: 'research',
-              args: {'request': 'compare Swiss CPI releases'},
+              toolCallId: 'bash-1',
+              name: 'bash',
+              args: {'command': 'ls -la /tmp'},
             ),
             isUser: false,
           ),
@@ -55,7 +55,7 @@ void main() {
       ),
     );
 
-    expect(find.text('Research(compare Swiss CPI releases)'), findsOneWidget);
+    expect(find.text('Bash(ls -la /tmp)'), findsOneWidget);
   });
 }
 

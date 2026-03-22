@@ -104,13 +104,6 @@ def test_estimate_excludes_internal_calls_and_thinking_trace():
                             args={"originalFunctionCall": {"name": "bash"}},
                         )
                     ),
-                    types.Part(
-                        function_call=types.FunctionCall(
-                            id="transfer-1",
-                            name="transfer_to_agent",
-                            args={"agent_name": "research"},
-                        )
-                    ),
                     types.Part(text="Visible answer"),
                 ],
             ),
