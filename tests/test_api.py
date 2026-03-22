@@ -173,6 +173,8 @@ def test_model_settings_can_be_listed_and_updated(tmp_path):
         "claude_sonnet_4_6": True,
         "gemini_3_flash": True,
         "gemini_3_1_pro": True,
+        "gpt_5_4": False,
+        "gpt_5_4_mini": False,
     }
 
     update_response = client.put(

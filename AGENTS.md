@@ -36,6 +36,9 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - `Claude Sonnet 4.6`
   - `Gemini 3 Flash` (`gemini-3-flash-preview`)
   - `Gemini 3.1 Pro` (`gemini-3.1-pro-preview`)
+  - `GPT-5.4` (`gpt-5.4`)
+  - `GPT-5.4 mini` (`gpt-5.4-mini`)
+- OpenAI requests are routed through ADK's `LiteLlm` wrapper (backed by the `litellm` library) with the `openai/` model prefix.
 - Anthropic requests use manual extended thinking via `src/conduit/anthropic_extended_thinking.py`.
 - The client receives thinking traces as separate data and renders them collapsibly; they are not merged into the visible assistant answer.
 - Per-turn hidden context is injected from the client:
@@ -145,7 +148,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - `ANTHROPIC_API_KEY`
   - `GOOGLE_API_KEY` or `GEMINI_API_KEY`
   - `BRAVE_API_KEY`
-  - `OPENAI_API_KEY` for the in-container Codex CLI only; the backend does not use it for model routing
+  - `OPENAI_API_KEY` for GPT-5.4 / GPT-5.4 mini model routing and the in-container Codex CLI
 - Important paths:
   - DB: `data/conduit.db`
   - model config: `config/models.yaml`

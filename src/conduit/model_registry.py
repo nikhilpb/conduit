@@ -76,6 +76,18 @@ DEFAULT_MODEL_OPTIONS: tuple[ModelOption, ...] = (
         model="gemini-3.1-pro-preview",
         provider="google",
     ),
+    ModelOption(
+        key="gpt_5_4",
+        label="GPT-5.4",
+        model="gpt-5.4",
+        provider="openai",
+    ),
+    ModelOption(
+        key="gpt_5_4_mini",
+        label="GPT-5.4 mini",
+        model="gpt-5.4-mini",
+        provider="openai",
+    ),
 )
 
 DEFAULT_ACTIVE_MODEL_KEY = "claude_opus_4_6"
@@ -87,6 +99,8 @@ def infer_provider(model_name: str) -> str:
         return "anthropic"
     if normalized.startswith("gemini"):
         return "google"
+    if normalized.startswith("gpt-") or normalized.startswith("o1") or normalized.startswith("o3"):
+        return "openai"
     return "unknown"
 
 
@@ -138,7 +152,7 @@ def _load_options(raw_models: object) -> tuple[ModelOption, ...]:
 
         label = str(value.get("label") or model_name)
         provider = str(value.get("provider") or infer_provider(model_name))
-        if provider not in {"anthropic", "google"}:
+        if provider not in {"anthropic", "google", "openai"}:
             continue
 
         options.append(

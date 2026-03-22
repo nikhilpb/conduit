@@ -10,6 +10,8 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
 
+from google.adk.models.lite_llm import LiteLlm
+
 from conduit.anthropic_extended_thinking import ConduitAnthropicLlm
 from conduit.config import Settings
 from conduit.model_registry import infer_provider
@@ -194,7 +196,9 @@ def _select_tool_names(
     )
 
 
-def _build_model(settings: Settings, *, model_name: str) -> str | ConduitAnthropicLlm:
+def _build_model(
+    settings: Settings, *, model_name: str
+) -> str | ConduitAnthropicLlm | LiteLlm:
     provider = infer_provider(model_name)
     if provider == "anthropic":
         return ConduitAnthropicLlm(
@@ -203,6 +207,8 @@ def _build_model(settings: Settings, *, model_name: str) -> str | ConduitAnthrop
             thinking_budget_tokens=settings.anthropic_thinking_budget_tokens,
             interleaved_thinking=settings.anthropic_interleaved_thinking,
         )
+    if provider == "openai":
+        return LiteLlm(model=f"openai/{model_name}")
     return model_name
 
 

@@ -59,6 +59,11 @@ class Settings(BaseSettings):
         validation_alias="BRAVE_API_KEY",
         repr=False,
     )
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENAI_API_KEY",
+        repr=False,
+    )
 
     @cached_property
     def tool_permissions(self) -> dict[str, str]:
@@ -73,6 +78,8 @@ class Settings(BaseSettings):
             return bool(self.anthropic_api_key)
         if provider == "google":
             return bool(self.google_api_key)
+        if provider == "openai":
+            return bool(self.openai_api_key)
         return False
 
 
@@ -88,5 +95,7 @@ def get_settings() -> Settings:
         os.environ.setdefault("GOOGLE_API_KEY", settings.google_api_key)
     if settings.anthropic_api_key:
         os.environ.setdefault("ANTHROPIC_API_KEY", settings.anthropic_api_key)
+    if settings.openai_api_key:
+        os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
 
     return settings
