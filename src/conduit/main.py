@@ -36,6 +36,7 @@ from conduit.schemas import SessionResponse
 from conduit.schemas import TranscriptMessage
 from conduit.schemas import ToolCall
 from conduit.schemas import UpdateModelRequest
+from conduit.tool_call_utils import is_internal_tool_call
 from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 from conduit.user_context import build_state_delta
@@ -266,27 +267,29 @@ def _build_transcript(events) -> list[TranscriptMessage]:
         thinking_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for part in parts:
-            if getattr(part, "function_call", None):
+            function_call = getattr(part, "function_call", None)
+            if function_call and not is_internal_tool_call(function_call.name):
                 tool_calls.append(
                     ToolCall(
-                        tool_call_id=part.function_call.id,
-                        name=part.function_call.name,
-                        args=dict(part.function_call.args or {}),
+                        tool_call_id=function_call.id,
+                        name=function_call.name,
+                        args=dict(function_call.args or {}),
                         status="pending",
                     )
                 )
-            if getattr(part, "function_response", None):
-                status, error = tool_response_status(part.function_response.response)
+            function_response = getattr(part, "function_response", None)
+            if function_response and not is_internal_tool_call(function_response.name):
+                status, error = tool_response_status(function_response.response)
                 tool_calls.append(
                     ToolCall(
-                        tool_call_id=part.function_response.id,
-                        name=part.function_response.name or "tool",
+                        tool_call_id=function_response.id,
+                        name=function_response.name or "tool",
                         args={},
                         status=status,
                         error=error,
                         response=public_tool_response(
-                            part.function_response.name,
-                            part.function_response.response,
+                            function_response.name,
+                            function_response.response,
                         ),
                     )
                 )

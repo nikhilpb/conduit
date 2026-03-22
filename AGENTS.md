@@ -19,16 +19,21 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 
 ## Current Product Shape
 
-- One ADK agent only. No router/specialist hierarchy is implemented yet.
+- The runtime uses a root ADK agent named `conduit`.
+- When both `web_search` and `web_fetch` are enabled for a run and both are effectively `allow`, the root agent also exposes a `research` worker tool backed by a child ADK agent named `research`.
+- The `research` worker is used for one or many scoped web-research subtasks inside a single turn. It owns only `web_search` and `web_fetch`, accepts a single `request` field, and returns a structured citation-grounded subreport with Markdown findings, source metadata, and optional evidence gaps.
+- When either web tool is approval-gated (`ask`) or unavailable, the `research` worker is omitted and the root agent keeps direct access to `web_search` and `web_fetch` for that run.
 - Tooling is currently limited to:
   - `bash`: executes arbitrary `bash -lc` commands on the host and returns structured stdout/stderr, exit status, and timeout metadata. This tool always requires user approval before execution.
-  - `web_search`: Brave Search API first, Ecosia HTML fallback.
-  - `web_fetch`: HTTP/HTML/text fetch with cleaned content extraction.
+  - `research`: visible root-level tool that delegates web-research subtasks to the child `research` agent when both web tools are server-allowed.
+  - `web_search`: Brave Search API first, Ecosia HTML fallback. This is exposed directly on the root agent only when the `research` worker is not active; otherwise it is owned by the child `research` agent.
+  - `web_fetch`: HTTP/HTML/text fetch with cleaned content extraction. This is exposed directly on the root agent only when the `research` worker is not active; otherwise it is owned by the child `research` agent.
   - `memory_search`: read-only search over the local `memory/memory.md` Markdown file.
   - `polymarket_search_markets` / `polymarket_list_markets` / `polymarket_get_market` / `polymarket_get_price_history`: public Polymarket market lookup, current pricing, price history, liquidity, and volume snapshots.
   - `recipe_lookup`: read-only lookup against a local `recipes.json` catalog when `config/recipes.yaml` resolves to an existing file.
   - The root agent treats `memory/memory.md` as per-worktree local memory. It searches that file on demand through `memory_search`, and only writes to it through `bash` when that tool is available.
-  - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
+- Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
+- The root agent is responsible for the final user-facing response. Research-heavy answers are expected to be synthesized into one Markdown report with inline citations and a short sources section after any delegated `research` subtasks complete.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Headless scheduled sessions can be configured on the backend via `config/scheduled_sessions.yaml`; each scheduled run uses its configured raw model name, UTC cron schedule, seed query, and allowed tool list.
 - The repo default scheduled config currently includes `iran-us-conflict-news`, which runs daily at `06:00 UTC` using `claude-opus-4-6` with `web_search`, `web_fetch`, and all Polymarket tools.
@@ -55,7 +60,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - Applies model registry changes live.
   - Uses `ResumabilityConfig(is_resumable=True)`.
 - `src/conduit/agent.py`
-  - Builds the single root agent.
+  - Builds the root `conduit` agent and, when eligible, the child `research` worker plus its visible root `research` `AgentTool`.
   - Wires `before_model_callback` for hidden context injection.
   - Wires `before_tool_callback` for permission policy.
 - `src/conduit/websocket_chat.py`
@@ -84,6 +89,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - Pydantic models for the API surface (health, sessions, transcripts, chat, model settings, context estimates).
 - `src/conduit/tool_call_utils.py`
   - Helpers for tool response status, sanitized bash payloads, and internal tool-call filtering.
+  - Internal tool filtering hides both `adk_request_confirmation` and ADK `transfer_to_agent` plumbing from app-facing transcripts, websocket events, and context estimates.
 - `src/conduit/recipe_catalog.py`
   - Resolves the configured recipe catalog path and ranks recipe matches.
 - `src/conduit/tools/bash.py`
@@ -121,8 +127,9 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.
 - Tool calls get explicit UI treatment; approval requests are surfaced inline.
-- The Flutter client hides internal `adk_request_confirmation` transcript items entirely once their hidden tool calls are stripped; approvals only appear through the dedicated approval UI.
+- The Flutter client hides internal `adk_request_confirmation` and `transfer_to_agent` transcript items entirely once their hidden tool calls are stripped; approvals only appear through the dedicated approval UI.
 - Standalone tool-call transcript items render as chips without an enclosing chat bubble; `bash` chips are labeled as `Bash(<truncated command>)`.
+- Standalone `research` tool calls render as `Research(<truncated request>)` chips.
 - Tool results are tracked separately from tool invocations; failed tool calls remain visible in the transcript and render in red in the client.
 - Session records include `session_kind` (`interactive` or `scheduled`) and an optional `scheduled_job_id`.
 - `bash` tool results preserve sanitized runtime payloads (`stdout`, `stderr`, `exit_code`, timeout metadata) through websocket replay and session transcripts, but the Flutter client does not render inline bash output; it keeps a single bash invocation chip in history and in live turns.
@@ -188,7 +195,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 
 ## Current Gaps Relative To Design
 
-- No multi-agent router/specialists yet.
+- No general multi-agent router or broader specialist set beyond the `research` worker.
 - No filesystem skill loading yet.
 - Voice/image buttons exist in the client but are not wired.
 - Binary artifact storage beyond text/web fetch is not implemented.

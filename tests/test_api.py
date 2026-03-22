@@ -503,6 +503,45 @@ def test_build_transcript_includes_bash_tool_response():
     }
 
 
+def test_build_transcript_ignores_internal_transfer_calls():
+    events = [
+        Event(
+            invocation_id="inv-test",
+            author="conduit",
+            content=types.Content(
+                role="model",
+                parts=[
+                    types.Part(
+                        function_call=types.FunctionCall(
+                            id="transfer-1",
+                            name="transfer_to_agent",
+                            args={"agent_name": "research"},
+                        )
+                    )
+                ],
+            ),
+        ),
+        Event(
+            invocation_id="inv-test",
+            author="conduit",
+            content=types.Content(
+                role="user",
+                parts=[
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            id="transfer-1",
+                            name="transfer_to_agent",
+                            response={"agent_name": "research"},
+                        )
+                    )
+                ],
+            ),
+        ),
+    ]
+
+    assert _build_transcript(events) == []
+
+
 def test_before_model_callback_accepts_keyword_callback_context():
     agent = build_root_agent(
         Settings(_env_file=None),

@@ -12,25 +12,41 @@ def _empty_scheduled_sessions_path(tmp_path) -> str:
     return str(path)
 
 
+def _tool_names(agent) -> list[str]:
+    return [
+        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
+        for tool in agent.tools
+    ]
+
+
+def _research_child(agent):
+    assert len(agent.sub_agents) == 1
+    research_agent = agent.sub_agents[0]
+    assert research_agent.name == "research"
+    return research_agent
+
+
 def test_build_root_agent_includes_registered_tools():
     agent = build_root_agent(
         Settings(_env_file=None),
         model_name="claude-sonnet-4-6",
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    tool_names = _tool_names(agent)
+    research_agent = _research_child(agent)
+    research_tool_names = _tool_names(research_agent)
 
     assert "bash" in tool_names
-    assert "web_search" in tool_names
-    assert "web_fetch" in tool_names
+    assert "research" in tool_names
+    assert "web_search" not in tool_names
+    assert "web_fetch" not in tool_names
     assert "memory_search" in tool_names
     assert "polymarket_search_markets" in tool_names
     assert "polymarket_list_markets" in tool_names
     assert "polymarket_get_market" in tool_names
     assert "polymarket_get_price_history" in tool_names
+    assert research_tool_names == ["web_search", "web_fetch"]
+    assert "Use research for web investigation" in agent.instruction
     assert "every bash call requires explicit user confirmation" in agent.instruction
     assert "do not claim the output was missing" in agent.instruction
     assert "Use memory_search before you answer questions about what you remember" in agent.instruction
@@ -74,10 +90,7 @@ def test_build_root_agent_includes_recipe_lookup_when_catalog_is_configured(tmp_
         model_name="claude-sonnet-4-6",
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    tool_names = _tool_names(agent)
 
     assert "recipe_lookup" in tool_names
     assert "Use recipe_lookup" in agent.instruction
@@ -90,10 +103,7 @@ def test_build_root_agent_can_disable_bash():
         enable_bash=False,
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    tool_names = _tool_names(agent)
 
     assert "bash" not in tool_names
     assert "memory_search" in tool_names
@@ -111,17 +121,36 @@ def test_runtime_uses_bash_only_for_websocket_runner(tmp_path):
         )
     )
 
-    websocket_tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in runtime.app.root_agent.tools
-    ]
-    http_tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in runtime.http_app.root_agent.tools
-    ]
+    websocket_tool_names = _tool_names(runtime.app.root_agent)
+    http_tool_names = _tool_names(runtime.http_app.root_agent)
 
     assert "bash" in websocket_tool_names
     assert "bash" not in http_tool_names
+
+
+def test_build_root_agent_uses_direct_web_tools_when_research_is_not_safe(tmp_path):
+    permissions_path = tmp_path / "tools.yaml"
+    permissions_path.write_text(
+        """
+tools:
+  web_fetch:
+    mode: ask
+"""
+    )
+    agent = build_root_agent(
+        Settings(
+            _env_file=None,
+            tool_permissions_path=str(permissions_path),
+        ),
+        model_name="claude-sonnet-4-6",
+    )
+
+    tool_names = _tool_names(agent)
+
+    assert "research" not in tool_names
+    assert "web_search" in tool_names
+    assert "web_fetch" in tool_names
+    assert agent.sub_agents == []
 
 
 def test_build_root_agent_can_limit_tools_and_auto_approve_bash():
@@ -132,10 +161,7 @@ def test_build_root_agent_can_limit_tools_and_auto_approve_bash():
         auto_approve_tools=True,
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    tool_names = _tool_names(agent)
 
     assert tool_names == ["web_fetch", "bash"]
     assert "requires explicit user confirmation" not in agent.instruction
@@ -179,11 +205,19 @@ scheduled_sessions:
     )
 
     scheduled_runtime = runtime.scheduled_session_runtimes["daily-briefing"]
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in scheduled_runtime.app.root_agent.tools
-    ]
+    tool_names = _tool_names(scheduled_runtime.app.root_agent)
 
     assert scheduled_runtime.definition.model == "gemini-3-flash-preview"
     assert scheduled_runtime.app.root_agent.model == "gemini-3-flash-preview"
     assert tool_names == ["web_fetch", "bash"]
+
+
+def test_build_root_agent_wraps_web_research_as_a_single_tool():
+    agent = build_root_agent(
+        Settings(_env_file=None),
+        model_name="claude-sonnet-4-6",
+        allowed_tools=("web_search", "web_fetch"),
+    )
+
+    assert _tool_names(agent) == ["research"]
+    assert _tool_names(_research_child(agent)) == ["web_search", "web_fetch"]
