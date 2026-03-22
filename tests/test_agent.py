@@ -12,28 +12,52 @@ def _empty_scheduled_sessions_path(tmp_path) -> str:
     return str(path)
 
 
+def _get_tool_names(agent):
+    return [
+        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
+        for tool in agent.tools
+    ]
+
+
 def test_build_root_agent_includes_registered_tools():
     agent = build_root_agent(
         Settings(_env_file=None),
         model_name="claude-sonnet-4-6",
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    root_tool_names = _get_tool_names(agent)
 
-    assert "bash" in tool_names
-    assert "web_search" in tool_names
-    assert "web_fetch" in tool_names
-    assert "polymarket_search_markets" in tool_names
-    assert "polymarket_list_markets" in tool_names
-    assert "polymarket_get_market" in tool_names
-    assert "polymarket_get_price_history" in tool_names
+    assert "bash" in root_tool_names
+    assert "polymarket_search_markets" in root_tool_names
+    assert "polymarket_list_markets" in root_tool_names
+    assert "polymarket_get_market" in root_tool_names
+    assert "polymarket_get_price_history" in root_tool_names
+    # web_search and web_fetch are on the Research sub-agent
+    assert "web_search" not in root_tool_names
+    assert "web_fetch" not in root_tool_names
     assert "every bash call requires explicit user confirmation" in agent.instruction
     assert "do not claim the output was missing" in agent.instruction
     assert "future-looking probabilities" in agent.instruction
     assert "check Polymarket first when it is relevant" in agent.instruction
+    assert "Research sub-agent" in agent.instruction
+
+
+def test_build_root_agent_has_research_sub_agent():
+    agent = build_root_agent(
+        Settings(_env_file=None),
+        model_name="claude-sonnet-4-6",
+    )
+
+    assert len(agent.sub_agents) == 1
+    research_agent = agent.sub_agents[0]
+    assert research_agent.name == "research"
+
+    research_tool_names = _get_tool_names(research_agent)
+    assert "web_search" in research_tool_names
+    assert "web_fetch" in research_tool_names
+    assert "bash" not in research_tool_names
+    assert "web_search" in research_agent.instruction
+    assert "web_fetch" in research_agent.instruction
 
 
 def test_build_root_agent_includes_recipe_lookup_when_catalog_is_configured(tmp_path):
@@ -71,12 +95,9 @@ def test_build_root_agent_includes_recipe_lookup_when_catalog_is_configured(tmp_
         model_name="claude-sonnet-4-6",
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    root_tool_names = _get_tool_names(agent)
 
-    assert "recipe_lookup" in tool_names
+    assert "recipe_lookup" in root_tool_names
     assert "Use recipe_lookup" in agent.instruction
 
 
@@ -87,12 +108,9 @@ def test_build_root_agent_can_disable_bash():
         enable_bash=False,
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    root_tool_names = _get_tool_names(agent)
 
-    assert "bash" not in tool_names
+    assert "bash" not in root_tool_names
     assert "Use bash when you need to inspect" not in agent.instruction
 
 
@@ -106,17 +124,22 @@ def test_runtime_uses_bash_only_for_websocket_runner(tmp_path):
         )
     )
 
-    websocket_tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in runtime.app.root_agent.tools
-    ]
-    http_tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in runtime.http_app.root_agent.tools
-    ]
+    websocket_tool_names = _get_tool_names(runtime.app.root_agent)
+    http_tool_names = _get_tool_names(runtime.http_app.root_agent)
 
     assert "bash" in websocket_tool_names
     assert "bash" not in http_tool_names
+
+
+def test_build_root_agent_no_research_sub_agent_when_no_research_tools():
+    agent = build_root_agent(
+        Settings(_env_file=None),
+        model_name="claude-sonnet-4-6",
+        allowed_tools=("bash",),
+    )
+
+    assert len(agent.sub_agents) == 0
+    assert "Research sub-agent" not in agent.instruction
 
 
 def test_build_root_agent_can_limit_tools_and_auto_approve_bash():
@@ -127,12 +150,14 @@ def test_build_root_agent_can_limit_tools_and_auto_approve_bash():
         auto_approve_tools=True,
     )
 
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in agent.tools
-    ]
+    root_tool_names = _get_tool_names(agent)
 
-    assert tool_names == ["web_fetch", "bash"]
+    # bash stays on root, web_fetch goes to research sub-agent
+    assert "bash" in root_tool_names
+    assert "web_fetch" not in root_tool_names
+    assert len(agent.sub_agents) == 1
+    research_tool_names = _get_tool_names(agent.sub_agents[0])
+    assert "web_fetch" in research_tool_names
     assert "requires explicit user confirmation" not in agent.instruction
 
     callback_result = asyncio.run(
@@ -174,11 +199,13 @@ scheduled_sessions:
     )
 
     scheduled_runtime = runtime.scheduled_session_runtimes["daily-briefing"]
-    tool_names = [
-        getattr(tool, "__name__", getattr(tool, "name", type(tool).__name__))
-        for tool in scheduled_runtime.app.root_agent.tools
-    ]
+    root_tool_names = _get_tool_names(scheduled_runtime.app.root_agent)
 
     assert scheduled_runtime.definition.model == "gemini-3-flash-preview"
     assert scheduled_runtime.app.root_agent.model == "gemini-3-flash-preview"
-    assert tool_names == ["web_fetch", "bash"]
+    assert "bash" in root_tool_names
+    assert "web_fetch" not in root_tool_names
+    # web_fetch is on the research sub-agent
+    assert len(scheduled_runtime.app.root_agent.sub_agents) == 1
+    research_tool_names = _get_tool_names(scheduled_runtime.app.root_agent.sub_agents[0])
+    assert "web_fetch" in research_tool_names
