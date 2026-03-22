@@ -29,7 +29,6 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
 - Model choice is server-owned and persisted in `config/models.yaml`.
 - Headless scheduled sessions can be configured on the backend via `config/scheduled_sessions.yaml`; each scheduled run uses its configured raw model name, UTC cron schedule, seed query, and allowed tool list.
-- Scheduled sessions keep an internal rolling memory of the last 7 stored run summaries for the same scheduled job. Each successful scheduled run triggers a second no-tool LLM call with the same raw model to summarize the final assistant reply, stores that summary in SQLite, and injects the prior summaries back into later runs as hidden context.
 - The repo default scheduled config currently includes `iran-us-conflict-news`, which runs daily at `06:00 UTC` using `claude-opus-4-6` with `web_search`, `web_fetch`, and all Polymarket tools.
 - Supported base models:
   - `Claude Opus 4.6`
@@ -53,7 +52,6 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - ADK `App` + `Runner` wrapper.
   - Applies model registry changes live.
   - Uses `ResumabilityConfig(is_resumable=True)`.
-  - Loads the last 7 stored summaries for a scheduled job into hidden per-turn context before each scheduled run and performs the post-run internal summary pass.
 - `src/conduit/agent.py`
   - Builds the single root agent.
   - Wires `before_model_callback` for hidden context injection.
@@ -65,7 +63,6 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 - `src/conduit/sessions/sqlite_service.py`
   - Custom ADK `BaseSessionService`.
   - Persists ADK sessions/events plus `client_turns` for websocket replay/idempotency.
-  - Stores scheduled-session summary memory in a dedicated `scheduled_session_summaries` table keyed by source scheduled session id.
 - `src/conduit/model_registry.py`
   - Loads/persists model options and active model from `config/models.yaml`.
 - `src/conduit/scheduled_sessions.py`
@@ -73,7 +70,6 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - Runs configured scheduled sessions through an in-process APScheduler service.
 - `src/conduit/user_context.py`
   - Converts client context into ADK state delta and hidden model instructions.
-  - Formats prior scheduled-session summaries from temp state into hidden model instructions for scheduled runs.
 - `src/conduit/context_estimate.py`
   - Deterministic character/token estimation for app-facing context usage.
   - Counts session text plus non-internal tool calls/results with a fixed chars-per-token ratio.
@@ -115,7 +111,6 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 - Sessions are lazy-created from the first sent message; opening “New session” alone does not create one.
 - Scheduled runs create a fresh session per trigger and store the seed query as the first normal user event.
 - Scheduled runs also inject their scheduler fire time in UTC into the same per-turn current-time context channel that interactive turns use.
-- Scheduled runs inject up to 7 prior stored summaries for the same scheduled job as hidden context, ordered oldest-to-newest within that window.
 - Session title is derived from the first user message.
 - Session list/settings still use HTTP; chat uses websocket.
 - Assistant markdown is rendered, not shown raw.
