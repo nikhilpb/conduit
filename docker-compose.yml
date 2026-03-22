@@ -19,6 +19,7 @@ services:
       - .:/workspace
       - ./data:/app/data
       - ./config:/app/config
+      - ./memory:/app/memory
     healthcheck:
       test:
         [
