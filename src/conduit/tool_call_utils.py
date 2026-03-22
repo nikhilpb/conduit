@@ -8,6 +8,7 @@ from typing import Mapping
 from google.adk.flows.llm_flows.functions import (
     REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
 )
+from google.adk.tools.transfer_to_agent_tool import TransferToAgentTool
 
 
 BASH_PUBLIC_RESPONSE_FIELDS = (
@@ -24,7 +25,11 @@ BASH_PUBLIC_RESPONSE_FIELDS = (
     "error",
 )
 
-INTERNAL_TOOL_CALL_NAMES = frozenset({REQUEST_CONFIRMATION_FUNCTION_CALL_NAME})
+_TRANSFER_TO_AGENT_TOOL_NAME = TransferToAgentTool(agent_names=[]).name
+
+INTERNAL_TOOL_CALL_NAMES = frozenset(
+    {REQUEST_CONFIRMATION_FUNCTION_CALL_NAME, _TRANSFER_TO_AGENT_TOOL_NAME}
+)
 
 
 def tool_response_status(

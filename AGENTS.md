@@ -19,11 +19,12 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 
 ## Current Product Shape
 
-- One ADK agent only. No router/specialist hierarchy is implemented yet.
-- Tooling is currently limited to:
-  - `bash`: executes arbitrary `bash -lc` commands on the host and returns structured stdout/stderr, exit status, and timeout metadata. This tool always requires user approval before execution.
-  - `web_search`: Brave Search API first, Ecosia HTML fallback.
-  - `web_fetch`: HTTP/HTML/text fetch with cleaned content extraction.
+- Root agent with one Research sub-agent. The root agent acts as a router, delegating web research tasks to the Research sub-agent via ADK's `transfer_to_agent` mechanism.
+- The Research sub-agent owns `web_search` and `web_fetch`; all other tools remain on the root agent.
+- Tooling across agents:
+  - `bash` (root): executes arbitrary `bash -lc` commands on the host and returns structured stdout/stderr, exit status, and timeout metadata. This tool always requires user approval before execution.
+  - `web_search` (research): Brave Search API first, Ecosia HTML fallback.
+  - `web_fetch` (research): HTTP/HTML/text fetch with cleaned content extraction.
   - `polymarket_search_markets` / `polymarket_list_markets` / `polymarket_get_market` / `polymarket_get_price_history`: public Polymarket market lookup, current pricing, price history, liquidity, and volume snapshots.
   - `recipe_lookup`: read-only lookup against a local `recipes.json` catalog when `config/recipes.yaml` resolves to an existing file.
   - Agent instruction biases future-looking probability questions toward the Polymarket tools when relevant.
@@ -55,9 +56,10 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
   - Uses `ResumabilityConfig(is_resumable=True)`.
   - Loads the last 7 stored summaries for a scheduled job into hidden per-turn context before each scheduled run and performs the post-run internal summary pass.
 - `src/conduit/agent.py`
-  - Builds the single root agent.
+  - Builds the root agent and Research sub-agent.
+  - Research sub-agent owns `web_search` and `web_fetch`; root owns all other tools.
   - Wires `before_model_callback` for hidden context injection.
-  - Wires `before_tool_callback` for permission policy.
+  - Wires `before_tool_callback` for permission policy on both root and Research agents.
 - `src/conduit/websocket_chat.py`
   - Own websocket protocol layer.
   - Handles `ack`, `tool_call`, `tool_result`, `thought`, `token`, `done`, `approval_required`, `error`.
@@ -83,7 +85,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 - `src/conduit/schemas.py`
   - Pydantic models for the API surface (health, sessions, transcripts, chat, model settings, context estimates).
 - `src/conduit/tool_call_utils.py`
-  - Helpers for tool response status, sanitized bash payloads, and internal tool-call filtering.
+  - Helpers for tool response status, sanitized bash payloads, and internal tool-call filtering (includes `transfer_to_agent`).
 - `src/conduit/recipe_catalog.py`
   - Resolves the configured recipe catalog path and ranks recipe matches.
 - `src/conduit/tools/bash.py`
@@ -185,7 +187,7 @@ Prefer this file for the current implementation state. [DESIGN.md](DESIGN.md) in
 
 ## Current Gaps Relative To Design
 
-- No multi-agent router/specialists yet.
+- Only one sub-agent (Research) so far; additional specialists are not yet implemented.
 - No filesystem skill loading yet.
 - Voice/image buttons exist in the client but are not wired.
 - Binary artifact storage beyond text/web fetch is not implemented.

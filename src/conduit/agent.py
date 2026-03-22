@@ -22,6 +22,8 @@ from conduit.tools.web_fetch import build_web_fetch_tool
 from conduit.tools.web_search import build_web_search_tool
 from conduit.user_context import build_context_instructions
 
+_RESEARCH_TOOL_NAMES = frozenset({"web_search", "web_fetch"})
+
 
 def build_root_agent(
     settings: Settings,
@@ -31,29 +33,50 @@ def build_root_agent(
     allowed_tools: Collection[str] | None = None,
     auto_approve_tools: bool = False,
 ) -> Agent:
-    """Build the single-agent runtime used by the API and ADK Web."""
+    """Build the root agent with an optional Research sub-agent."""
 
     tool_registry = _build_tool_registry(settings, enable_bash=enable_bash)
     selected_tool_names = _select_tool_names(
         tool_registry,
         allowed_tools=allowed_tools,
     )
-    tools = [tool_registry[tool_name] for tool_name in selected_tool_names]
+
+    research_tool_names = _RESEARCH_TOOL_NAMES & set(selected_tool_names)
+    root_tool_names = tuple(
+        name for name in selected_tool_names if name not in research_tool_names
+    )
+    root_tools = [tool_registry[name] for name in root_tool_names]
+
+    sub_agents: list[Agent] = []
+    if research_tool_names:
+        research_tools = [tool_registry[name] for name in selected_tool_names
+                          if name in research_tool_names]
+        sub_agents.append(
+            _build_research_agent(
+                settings,
+                model_name=model_name,
+                tools=research_tools,
+                tool_names=tuple(sorted(research_tool_names)),
+                auto_approve_tools=auto_approve_tools,
+            )
+        )
 
     return Agent(
         name="conduit",
         model=_build_model(settings, model_name=model_name),
         description=_build_agent_description(selected_tool_names),
         instruction=_build_agent_instruction(
-            selected_tool_names,
+            root_tool_names,
             auto_approve_tools=auto_approve_tools,
+            has_research_agent=bool(research_tool_names),
         ),
         before_model_callback=_build_before_model_callback(),
         before_tool_callback=_build_before_tool_callback(
             settings,
             auto_approve_tools=auto_approve_tools,
         ),
-        tools=tools,
+        tools=root_tools,
+        sub_agents=sub_agents,
     )
 
 
@@ -89,6 +112,54 @@ def list_available_tool_names(
     """Return the names of the currently registered tools."""
 
     return tuple(_build_tool_registry(settings, enable_bash=enable_bash).keys())
+
+
+def _build_research_agent(
+    settings: Settings,
+    *,
+    model_name: str,
+    tools: list[object],
+    tool_names: tuple[str, ...],
+    auto_approve_tools: bool,
+) -> Agent:
+    """Build the Research sub-agent with web search and fetch tools."""
+
+    instruction_parts = [
+        "You are the Research agent, a specialist at finding and extracting "
+        "information from the web. ",
+    ]
+    if "web_search" in tool_names:
+        instruction_parts.append(
+            "Use web_search when you need to discover fresh information. "
+        )
+    if "web_fetch" in tool_names:
+        instruction_parts.append(
+            "Use web_fetch when you need to inspect a specific page or URL in detail. "
+        )
+    instruction_parts.extend(
+        [
+            "If a tool reports an error, treat it as a failed attempt and keep "
+            "working when useful. ",
+            "Prefer citing concrete facts from fetched pages when possible. ",
+            "If you are uncertain, say so directly.",
+        ]
+    )
+    return Agent(
+        name="research",
+        model=_build_model(settings, model_name=model_name),
+        description=(
+            "Specialist agent for web research. Delegate to this agent when "
+            "you need to search the web or fetch and read webpage content."
+        ),
+        instruction="".join(instruction_parts),
+        before_tool_callback=_build_before_tool_callback(
+            settings,
+            auto_approve_tools=auto_approve_tools,
+        ),
+        tools=tools,
+        disallow_transfer_to_parent=False,
+        disallow_transfer_to_peers=False,
+    )
 
 
 def _build_before_model_callback():
@@ -234,10 +305,17 @@ def _build_agent_instruction(
     tool_names: tuple[str, ...],
     *,
     auto_approve_tools: bool,
+    has_research_agent: bool = False,
 ) -> str:
     instruction_parts = [
         "You are Conduit, a research assistant. ",
     ]
+    if has_research_agent:
+        instruction_parts.append(
+            "You have a Research sub-agent that can search the web and fetch "
+            "webpages. Transfer to the Research agent when you need to look up "
+            "information online. "
+        )
     if "web_search" in tool_names:
         instruction_parts.append(
             "Use web_search when you need to discover fresh information. "
