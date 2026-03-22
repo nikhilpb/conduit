@@ -21,6 +21,7 @@ from conduit.notification_hub import NotificationHub
 from conduit.runtime import ConduitRuntime
 from conduit.sessions.sqlite_service import ClientTurnRecord
 from conduit.tool_permissions import permission_summary
+from conduit.tool_call_utils import is_internal_tool_call
 from conduit.tool_call_utils import public_tool_response
 from conduit.tool_call_utils import tool_response_status
 from conduit.user_context import build_state_delta
@@ -354,7 +355,7 @@ class WebSocketChatManager:
                     return
 
                 for function_call in event.get_function_calls():
-                    if function_call.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME:
+                    if is_internal_tool_call(function_call.name):
                         continue
 
                     tool_call_id = getattr(function_call, "id", None) or f"tool_{len(turn.tool_calls)}"
@@ -385,7 +386,7 @@ class WebSocketChatManager:
                     )
 
                 for function_response in event.get_function_responses():
-                    if function_response.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME:
+                    if is_internal_tool_call(function_response.name):
                         continue
 
                     tool_call_id = getattr(function_response, "id", None) or (

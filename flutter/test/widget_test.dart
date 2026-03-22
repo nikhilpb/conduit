@@ -1,6 +1,8 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:think_client/main.dart';
+import 'package:think_client/models.dart';
 import 'package:think_client/settings_store.dart';
 
 void main() {
@@ -33,6 +35,27 @@ void main() {
 
     expect(find.text('Point Conduit at your server.'), findsOneWidget);
     expect(find.text('Configure server'), findsOneWidget);
+  });
+
+  testWidgets('renders research tool chips with a friendly label', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: ToolChip(
+            toolCall: ToolCall(
+              toolCallId: 'research-1',
+              name: 'research',
+              args: {'request': 'compare Swiss CPI releases'},
+            ),
+            isUser: false,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Research(compare Swiss CPI releases)'), findsOneWidget);
   });
 }
 

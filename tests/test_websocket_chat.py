@@ -312,6 +312,36 @@ def test_websocket_turn_streams_bash_tool_result_response(tmp_path):
     assert runtime.iter_event_calls == 1
 
 
+def test_websocket_turn_hides_internal_transfer_tool_events(tmp_path):
+    app, runtime = _create_websocket_test_app(
+        tmp_path=tmp_path,
+        reply="Delegated internally and finished the turn.",
+        tool_name="transfer_to_agent",
+        tool_response={"agent_name": "research"},
+    )
+    client = TestClient(app)
+
+    with client.websocket_connect("/chat") as websocket:
+        websocket.send_json(
+            {
+                "type": "text",
+                "message_id": "m1",
+                "content": "research this topic",
+            }
+        )
+        events = _collect_events_until_terminal(websocket)
+
+    assert all(
+        event["type"] not in {"tool_call", "tool_result"}
+        for event in events
+    )
+    assert "".join(
+        event["content"] for event in events if event["type"] == "token"
+    ) == "Delegated internally and finished the turn."
+    assert events[-1]["type"] == "done"
+    assert runtime.iter_event_calls == 1
+
+
 def test_websocket_replays_completed_turn_for_duplicate_message_id(tmp_path):
     reply = "Replayable response from the fake runtime."
     app, runtime = _create_websocket_test_app(
