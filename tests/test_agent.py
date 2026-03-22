@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+from conduit.agent import _parse_research_report
 from conduit.agent import build_root_agent
 from conduit.config import Settings
 from conduit.runtime import ConduitRuntime
@@ -221,3 +222,70 @@ def test_build_root_agent_wraps_web_research_as_a_single_tool():
 
     assert _tool_names(agent) == ["research"]
     assert _tool_names(_research_child(agent)) == ["web_search", "web_fetch"]
+
+
+def test_research_child_leaves_output_schema_unset_for_gemini():
+    agent = build_root_agent(
+        Settings(_env_file=None, google_api_key="google-test"),
+        model_name="gemini-3-flash-preview",
+        allowed_tools=("web_search", "web_fetch"),
+    )
+
+    assert _research_child(agent).output_schema is None
+
+
+def test_parse_research_report_accepts_fenced_json_and_normalizes_sources():
+    report = _parse_research_report(
+        """```json
+{
+  "report_markdown": "Latest update from [Reuters](https://www.reuters.com/world/).",
+  "sources": [
+    {"title": "Reuters", "url": "https://www.reuters.com/world/"},
+    {"name": "BBC", "link": "https://www.bbc.com/news"}
+  ],
+  "gaps": "Conflicting casualty counts."
+}
+```"""
+    )
+
+    assert report == {
+        "report_markdown": "Latest update from [Reuters](https://www.reuters.com/world/).",
+        "sources": [
+            {
+                "title": "Reuters",
+                "url": "https://www.reuters.com/world/",
+            },
+            {
+                "title": "BBC",
+                "url": "https://www.bbc.com/news",
+            },
+        ],
+        "gaps": "Conflicting casualty counts.",
+    }
+
+
+def test_parse_research_report_falls_back_to_raw_markdown_and_extracts_links():
+    report = _parse_research_report(
+        "Summary with [BBC](https://www.bbc.com/news) and https://example.com/live."
+    )
+
+    assert report == {
+        "report_markdown": (
+            "Summary with [BBC](https://www.bbc.com/news) and "
+            "https://example.com/live."
+        ),
+        "sources": [
+            {
+                "title": "BBC",
+                "url": "https://www.bbc.com/news",
+            },
+            {
+                "title": "https://example.com/live",
+                "url": "https://example.com/live",
+            },
+        ],
+        "gaps": (
+            "Research worker returned unstructured output; preserved the raw "
+            "report text."
+        ),
+    }
